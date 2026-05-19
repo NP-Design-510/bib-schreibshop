@@ -1,0 +1,536 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>bib.schreibshop.de - ISBN Export</title>
+  <style>
+    :root {
+      --bg: #f6f3ee;
+      --ink: #1a1f2b;
+      --accent: #0f766e;
+      --card: #fffdf8;
+      --line: #d7d2c8;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Source Sans 3", "Segoe UI", sans-serif;
+      color: var(--ink);
+      background: radial-gradient(circle at 20% 20%, #fff6dd 0, transparent 35%),
+                  radial-gradient(circle at 80% 0%, #d8f4ef 0, transparent 30%),
+                  var(--bg);
+      min-height: 100vh;
+      display: grid;
+      place-items: center;
+      padding: 16px;
+    }
+    .card {
+      width: min(1120px, 100%);
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 18px;
+      box-shadow: 0 10px 35px rgba(0,0,0,.06);
+    }
+    h1 { margin: 0 0 10px; font-size: clamp(1.2rem, 3vw, 2rem); }
+    p { margin: 0 0 14px; }
+    textarea {
+      width: 100%;
+      min-height: 150px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 12px;
+      font-size: 1rem;
+      line-height: 1.45;
+      background: #fff;
+    }
+    .meta {
+      margin-top: 8px;
+      font-size: .95rem;
+      color: #475569;
+    }
+    .scanLayout {
+      display: grid;
+      grid-template-columns: .45fr 1.55fr;
+      gap: 12px;
+      align-items: start;
+    }
+    .scanPanel,
+    .statusPanel {
+      min-width: 0;
+    }
+    .scanPanel h2,
+    .statusPanel h2 {
+      margin: 0 0 8px;
+      font-size: 1rem;
+      color: #334155;
+    }
+    .scanPanel {
+      width: fit-content;
+    }
+    .scanPanel textarea {
+      width: calc(13ch + 26px);
+      min-width: calc(13ch + 26px);
+      max-width: calc(13ch + 26px);
+      font-family: "Consolas", "Courier New", monospace;
+    }
+    .liveList {
+      margin-top: 0;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #fff;
+      min-height: 150px;
+      max-height: 540px;
+      overflow: auto;
+      padding: 12px;
+    }
+    .liveRow {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      min-height: var(--scan-line-height, 23px);
+      height: var(--scan-line-height, 23px);
+      padding: 0;
+      font-size: .95rem;
+      line-height: 1;
+    }
+    .liveRow.ok .titleMuted { color: #166534; font-weight: 600; }
+    .liveRow.loading .titleMuted { color: #92400e; }
+    .liveRow.not_found .titleMuted,
+    .liveRow.invalid .titleMuted,
+    .liveRow.error .titleMuted,
+    .liveRow.auth .titleMuted,
+    .liveRow.rate .titleMuted { color: #b91c1c; }
+    .titleMuted { color: #64748b; }
+    .titleCell {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: nowrap;
+      min-width: 0;
+      width: 100%;
+    }
+    .statusPill {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: .78rem;
+      font-weight: 700;
+      letter-spacing: .01em;
+    }
+    .statusPill.ok { background: #dcfce7; color: #166534; }
+    .statusPill.loading { background: #fef3c7; color: #92400e; }
+    .statusPill.not_found,
+    .statusPill.invalid,
+    .statusPill.error,
+    .statusPill.auth,
+    .statusPill.rate { background: #fee2e2; color: #b91c1c; }
+    .emptyRow { color: #94a3b8; font-style: italic; white-space: nowrap; }
+    .titleMuted {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      display: inline-block;
+      min-width: 0;
+      max-width: 100%;
+    }
+    .row {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr auto auto;
+      gap: 10px;
+      margin-top: 10px;
+    }
+    .coversSection {
+      margin-top: 14px;
+      border-top: 1px solid var(--line);
+      padding-top: 12px;
+    }
+    .coversSection h2 {
+      margin: 0 0 10px;
+      font-size: 1rem;
+      color: #334155;
+    }
+    .coverGrid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+      gap: 10px;
+    }
+    .coverCard {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #fff;
+      padding: 8px;
+    }
+    .coverCard img {
+      width: 100%;
+      aspect-ratio: 2 / 3;
+      object-fit: cover;
+      border-radius: 6px;
+      background: #f1f5f9;
+      border: 1px solid #e2e8f0;
+    }
+    .coverTitle {
+      margin-top: 6px;
+      font-size: .82rem;
+      color: #334155;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    select, input, button {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 10px 12px;
+      font-size: 1rem;
+      background: white;
+    }
+    button {
+      background: var(--accent);
+      color: white;
+      border-color: var(--accent);
+      font-weight: 700;
+      cursor: pointer;
+    }
+    button:disabled { opacity: 0.6; cursor: not-allowed; }
+    .log {
+      margin-top: 10px;
+      font-size: .95rem;
+      color: #334155;
+      min-height: 20px;
+      white-space: pre-wrap;
+    }
+    @media (max-width: 700px) {
+      .scanLayout { grid-template-columns: 1fr; }
+      .row { grid-template-columns: 1fr; }
+      button { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <main class="card">
+    <h1>ISBN Export fuer bib.schreibshop.de</h1>
+    <p>ISBNs zeilenweise scannen/eingeben. Danach ZIP mit MARC21/XML, CSV und XLSX herunterladen.</p>
+
+    <div class="scanLayout">
+      <section class="scanPanel">
+        <h2>Scan-Feld</h2>
+        <textarea id="isbns" placeholder="9780140328721&#10;9783833936340"></textarea>
+        <div id="isbnCounter" class="meta">Erkannte ISBNs: 0</div>
+      </section>
+      <section class="statusPanel">
+        <h2>Status und Titel</h2>
+        <div id="liveLookup" class="liveList" hidden></div>
+      </section>
+    </div>
+
+    <div class="row">
+      <select id="prefer">
+        <option value="auto">Prioritaet: Auto</option>
+        <option value="google">Prioritaet: Google Books</option>
+        <option value="dnb">Prioritaet: DNB</option>
+        <option value="openlibrary">Prioritaet: OpenLibrary</option>
+      </select>
+      <input id="passcode" type="password" placeholder="Passcode (optional)">
+      <select id="hint">
+        <option value="scanner">Modus: Scanner</option>
+        <option value="manual">Modus: Manuell</option>
+      </select>
+      <button id="zipBtn" type="button">ZIP Export</button>
+      <button id="marcBtn" type="button">Nur MARC21</button>
+    </div>
+
+    <section class="coversSection">
+      <h2>Buchcover der gescannten ISBNs</h2>
+      <div id="coverGrid" class="coverGrid"></div>
+    </section>
+
+    <div id="log" class="log"></div>
+  </main>
+
+  <script>
+    const isbnInput = document.getElementById('isbns');
+    const isbnCounter = document.getElementById('isbnCounter');
+    const liveLookup = document.getElementById('liveLookup');
+    const coverGrid = document.getElementById('coverGrid');
+    const passcodeInput = document.getElementById('passcode');
+    const zipBtn = document.getElementById('zipBtn');
+    const marcBtn = document.getElementById('marcBtn');
+    const log = document.getElementById('log');
+    const titleCache = new Map();
+    let lookupTimer = null;
+
+    function escapeHtml(value) {
+      return String(value || '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+    }
+
+    function requestPasscode(force = false) {
+      const current = passcodeInput.value.trim();
+      if (!force && current) {
+        return current;
+      }
+
+      const entered = window.prompt('Bitte Passcode eingeben:', current || '');
+      if (entered === null) {
+        return '';
+      }
+
+      passcodeInput.value = String(entered).trim();
+      return passcodeInput.value;
+    }
+
+    function extractIsbn(line) {
+      const normalized = String(line || '').toUpperCase().replace(/[^0-9X]/g, '');
+
+      if (/^97[89][0-9]{10}$/.test(normalized)) {
+        return normalized;
+      }
+      if (/^[0-9]{9}[0-9X]$/.test(normalized)) {
+        return normalized;
+      }
+
+      const match13 = normalized.match(/97[89][0-9]{10}/);
+      if (match13) {
+        return match13[0];
+      }
+
+      const match10 = normalized.match(/[0-9]{9}[0-9X]/);
+      return match10 ? match10[0] : '';
+    }
+
+    function updateIsbnCounter() {
+      const lines = isbnInput.value.split(/\r?\n/);
+      const found = lines
+        .map((line) => extractIsbn(line))
+        .filter(Boolean);
+      const uniqueCount = new Set(found).size;
+      isbnCounter.textContent = `Erkannte ISBNs: ${uniqueCount}`;
+      syncStatusLayout();
+      renderLiveLookup(lines);
+      scheduleLookup(Array.from(new Set(found)));
+    }
+
+    function syncStatusLayout() {
+      const style = window.getComputedStyle(isbnInput);
+      const lineHeight = style.lineHeight;
+      const paddingTop = style.paddingTop;
+      const paddingBottom = style.paddingBottom;
+
+      document.documentElement.style.setProperty('--scan-line-height', lineHeight);
+      liveLookup.style.height = `${isbnInput.clientHeight}px`;
+      liveLookup.style.minHeight = `${isbnInput.clientHeight}px`;
+      liveLookup.style.maxHeight = `${isbnInput.clientHeight}px`;
+      liveLookup.style.paddingTop = paddingTop;
+      liveLookup.style.paddingBottom = paddingBottom;
+    }
+
+    function renderLiveLookup(lines) {
+      if (!lines.length) {
+        liveLookup.hidden = true;
+        liveLookup.innerHTML = '';
+        return;
+      }
+
+      liveLookup.hidden = false;
+      liveLookup.innerHTML = lines
+        .map((line) => {
+          const isbn = extractIsbn(line);
+          if (!isbn) {
+            return '<div class="liveRow"><div class="emptyRow">-</div></div>';
+          }
+
+          const cached = titleCache.get(isbn);
+          const status = cached?.status || 'loading';
+          let title = 'Titel wird geladen ...';
+          let label = 'laedt';
+          if (cached?.status === 'ok') {
+            title = cached.title;
+            label = 'ok';
+          } else if (cached?.status === 'not_found') {
+            title = 'Kein Titel gefunden';
+            label = 'nicht gefunden';
+          } else if (cached?.status === 'invalid') {
+            title = 'Ungueltige ISBN';
+            label = 'ungueltig';
+          } else if (cached?.status === 'error') {
+            title = 'Fehler beim Abruf';
+            label = 'fehler';
+          } else if (cached?.status === 'auth') {
+            title = 'Passcode fehlt oder ist falsch';
+            label = 'passcode';
+          } else if (cached?.status === 'rate') {
+            title = 'Zu viele Anfragen, bitte kurz warten';
+            label = 'limit';
+          }
+
+          return `<div class="liveRow ${status}"><div class="titleCell"><span class="statusPill ${status}">${escapeHtml(label)}</span><span class="titleMuted">${escapeHtml(title)}</span></div></div>`;
+        })
+        .join('');
+
+      renderCoverGrid(lines);
+    }
+
+    function renderCoverGrid(lines) {
+      const isbns = Array.from(new Set(lines.map((line) => extractIsbn(line)).filter(Boolean)));
+      const coverCards = isbns
+        .map((isbn) => {
+          const item = titleCache.get(isbn);
+          if (!item || item.status !== 'ok') {
+            return '';
+          }
+
+          const coverUrl = item.coverUrl || `https://covers.openlibrary.org/b/isbn/${isbn}-L.jpg`;
+          const title = item.title || isbn;
+          return `<article class="coverCard"><img src="${escapeHtml(coverUrl)}" alt="Cover: ${escapeHtml(title)}" loading="lazy"><div class="coverTitle">${escapeHtml(title)}</div></article>`;
+        })
+        .filter(Boolean)
+        .join('');
+
+      coverGrid.innerHTML = coverCards || '<div class="emptyRow">Noch keine Cover vorhanden.</div>';
+    }
+
+    function scheduleLookup(isbns) {
+      if (lookupTimer) {
+        clearTimeout(lookupTimer);
+      }
+      lookupTimer = setTimeout(() => runLookup(isbns), 250);
+    }
+
+    async function runLookup(isbns) {
+      const uncached = isbns.filter((isbn) => {
+        const status = titleCache.get(isbn)?.status;
+        return !status || status === 'error' || status === 'auth' || status === 'rate';
+      });
+      if (!uncached.length) {
+        return;
+      }
+
+      const prefer = document.getElementById('prefer').value;
+      const passcode = passcodeInput.value.trim();
+
+      if (!passcode) {
+        for (const isbn of uncached) {
+          titleCache.set(isbn, { status: 'auth' });
+        }
+        renderLiveLookup(isbnInput.value.split(/\r?\n/));
+        return;
+      }
+
+      for (const isbn of uncached) {
+        titleCache.set(isbn, { status: 'loading' });
+      }
+      renderLiveLookup(isbnInput.value.split(/\r?\n/));
+
+      try {
+        const res = await fetch('/api/lookup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ isbns: uncached, prefer, passcode })
+        });
+
+        if (!res.ok) {
+          let status = 'error';
+          if (res.status === 401) {
+            status = 'auth';
+          } else if (res.status === 429) {
+            status = 'rate';
+          }
+          for (const isbn of uncached) {
+            titleCache.set(isbn, { status });
+          }
+          renderLiveLookup(isbnInput.value.split(/\r?\n/));
+          return;
+        }
+
+        const payload = await res.json();
+        for (const entry of payload.results || []) {
+          titleCache.set(entry.isbn, {
+            status: entry.status,
+            title: entry.title || '',
+            coverUrl: entry.coverUrl || ''
+          });
+        }
+      } catch {
+        for (const isbn of uncached) {
+          titleCache.set(isbn, { status: 'error' });
+        }
+      }
+
+      renderLiveLookup(isbnInput.value.split(/\r?\n/));
+    }
+
+    async function runExport(format) {
+      const isbns = isbnInput.value;
+      const prefer = document.getElementById('prefer').value;
+      const passcode = requestPasscode(false);
+
+      if (!isbns.trim()) {
+        log.textContent = 'Bitte mindestens eine ISBN eingeben.';
+        return;
+      }
+
+      if (!passcode) {
+        log.textContent = 'Passcode erforderlich.';
+        return;
+      }
+
+      zipBtn.disabled = true;
+      marcBtn.disabled = true;
+      log.textContent = format === 'marc21' ? 'MARC21 Export laeuft ...' : 'ZIP Export laeuft ...';
+
+      try {
+        const res = await fetch('/api/export', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ isbns, prefer, format, passcode })
+        });
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ error: 'Unbekannter Fehler' }));
+          throw new Error(err.error || 'Export fehlgeschlagen');
+        }
+
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        const disposition = res.headers.get('content-disposition') || '';
+        const match = disposition.match(/filename="?([^";]+)"?/i);
+        a.download = match?.[1] || (format === 'marc21' ? `isbn-records-${Date.now()}.marc21.xml` : `bib-export-${Date.now()}.zip`);
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+
+        log.textContent = 'Fertig. Download gestartet.';
+      } catch (e) {
+        log.textContent = `Fehler: ${e.message}`;
+      } finally {
+        zipBtn.disabled = false;
+        marcBtn.disabled = false;
+      }
+    }
+
+    zipBtn.addEventListener('click', () => runExport('zip'));
+    marcBtn.addEventListener('click', () => runExport('marc21'));
+    isbnInput.addEventListener('input', updateIsbnCounter);
+    window.addEventListener('resize', syncStatusLayout);
+    document.getElementById('prefer').addEventListener('change', () => {
+      titleCache.clear();
+      updateIsbnCounter();
+    });
+    passcodeInput.addEventListener('change', () => {
+      titleCache.clear();
+      updateIsbnCounter();
+    });
+    syncStatusLayout();
+    updateIsbnCounter();
+    requestPasscode(true);
+  </script>
+</body>
+</html>

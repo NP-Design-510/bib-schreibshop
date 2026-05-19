@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>bib.schreibshop.de - Admin</title>
+  <style>
+    :root {
+      --bg: #f3f1ec;
+      --ink: #1e293b;
+      --card: #fff;
+      --line: #d7d2c8;
+      --accent: #1d4ed8;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "Source Sans 3", "Segoe UI", sans-serif;
+      background: linear-gradient(135deg, #fef3c7, #dbeafe);
+      color: var(--ink);
+      min-height: 100vh;
+      padding: 16px;
+    }
+    .wrap {
+      width: min(980px, 100%);
+      margin: 0 auto;
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 18px;
+      box-shadow: 0 8px 32px rgba(15, 23, 42, .09);
+    }
+    h1 { margin: 0 0 8px; }
+    p { margin: 0 0 14px; }
+    .row {
+      display: grid;
+      grid-template-columns: 1fr auto auto;
+      gap: 10px;
+      margin-bottom: 12px;
+    }
+    input, button {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 10px 12px;
+      font-size: 1rem;
+      background: #fff;
+    }
+    button {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    pre {
+      background: #0b1020;
+      color: #d1fae5;
+      padding: 12px;
+      border-radius: 10px;
+      overflow: auto;
+      max-height: 60vh;
+      font-size: .9rem;
+    }
+    @media (max-width: 700px) {
+      .row { grid-template-columns: 1fr; }
+      button { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <main class="wrap">
+    <h1>Admin - Export Monitoring</h1>
+    <p>Statistik ansehen und Audit-Log herunterladen.</p>
+
+    <div class="row">
+      <input id="passcode" type="password" placeholder="Passcode">
+      <button id="loadStats" type="button">Statistik laden</button>
+      <button id="downloadLogs" type="button">Logs herunterladen</button>
+    </div>
+
+    <pre id="out">Noch keine Daten geladen.</pre>
+  </main>
+
+  <script>
+    const out = document.getElementById('out');
+    const passcodeEl = document.getElementById('passcode');
+
+    function withPasscode(url) {
+      const passcode = passcodeEl.value.trim();
+      const u = new URL(url, window.location.origin);
+      if (passcode) {
+        u.searchParams.set('passcode', passcode);
+      }
+      return u.toString();
+    }
+
+    document.getElementById('loadStats').addEventListener('click', async () => {
+      out.textContent = 'Lade Statistik...';
+      try {
+        const res = await fetch(withPasscode('/api/admin/stats'));
+        const payload = await res.json();
+        if (!res.ok) {
+          throw new Error(payload.error || 'Fehler');
+        }
+        out.textContent = JSON.stringify(payload, null, 2);
+      } catch (e) {
+        out.textContent = `Fehler: ${e.message}`;
+      }
+    });
+
+    document.getElementById('downloadLogs').addEventListener('click', async () => {
+      out.textContent = 'Lade Audit-Log...';
+      try {
+        const res = await fetch(withPasscode('/api/admin/logs'));
+        if (!res.ok) {
+          const payload = await res.json().catch(() => ({ error: 'Fehler' }));
+          throw new Error(payload.error || 'Fehler');
+        }
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `export-audit-${Date.now()}.log`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        URL.revokeObjectURL(url);
+        out.textContent = 'Audit-Log heruntergeladen.';
+      } catch (e) {
+        out.textContent = `Fehler: ${e.message}`;
+      }
+    });
+  </script>
+</body>
+</html>
