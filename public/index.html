@@ -146,6 +146,12 @@
       gap: 10px;
       white-space: nowrap;
     }
+    .ghostBtn {
+      background: #fff;
+      color: #334155;
+      border-color: var(--line);
+      font-weight: 600;
+    }
     .coversSection {
       margin-top: 14px;
       border-top: 1px solid var(--line);
@@ -244,6 +250,7 @@
       <div class="actions">
         <button id="zipBtn" type="button">ZIP Export</button>
         <button id="marcBtn" type="button">Nur MARC21</button>
+        <button id="clearBtn" type="button" class="ghostBtn">Alle Scans löschen</button>
       </div>
     </div>
 
@@ -263,6 +270,7 @@
     const passcodeInput = document.getElementById('passcode');
     const zipBtn = document.getElementById('zipBtn');
     const marcBtn = document.getElementById('marcBtn');
+    const clearBtn = document.getElementById('clearBtn');
     const log = document.getElementById('log');
     const titleCache = new Map();
     let lookupTimer = null;
@@ -525,6 +533,16 @@
 
     zipBtn.addEventListener('click', () => runExport('zip'));
     marcBtn.addEventListener('click', () => runExport('marc21'));
+    clearBtn.addEventListener('click', () => {
+      isbnInput.value = '';
+      titleCache.clear();
+      liveLookup.hidden = true;
+      liveLookup.innerHTML = '';
+      coverGrid.innerHTML = '<div class="emptyRow">Noch keine Cover vorhanden.</div>';
+      isbnCounter.textContent = 'Erkannte ISBNs: 0';
+      log.textContent = 'Scans gelöscht.';
+      syncStatusLayout();
+    });
     isbnInput.addEventListener('input', updateIsbnCounter);
     window.addEventListener('resize', syncStatusLayout);
     document.getElementById('prefer').addEventListener('change', () => {
