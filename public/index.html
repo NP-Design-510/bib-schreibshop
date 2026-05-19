@@ -137,9 +137,14 @@
     }
     .row {
       display: grid;
-      grid-template-columns: 1fr 1fr 1fr auto auto;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(0, 1fr) auto;
       gap: 10px;
       margin-top: 10px;
+    }
+    .actions {
+      display: flex;
+      gap: 10px;
+      white-space: nowrap;
     }
     .coversSection {
       margin-top: 14px;
@@ -236,8 +241,10 @@
         <option value="scanner">Modus: Scanner</option>
         <option value="manual">Modus: Manuell</option>
       </select>
-      <button id="zipBtn" type="button">ZIP Export</button>
-      <button id="marcBtn" type="button">Nur MARC21</button>
+      <div class="actions">
+        <button id="zipBtn" type="button">ZIP Export</button>
+        <button id="marcBtn" type="button">Nur MARC21</button>
+      </div>
     </div>
 
     <section class="coversSection">
