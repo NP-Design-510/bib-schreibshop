@@ -45,6 +45,9 @@
       line-height: 1.45;
       background: #fff;
     }
+    textarea::placeholder {
+      color: #cbd5e1;
+    }
     textarea:focus,
     textarea:focus-visible {
       outline: none;
@@ -261,7 +264,7 @@
     <div class="scanLayout">
       <section class="scanPanel">
         <h2>Scan-Feld</h2>
-        <textarea id="isbns" placeholder="9780140328721&#10;9783833936340"></textarea>
+        <textarea id="isbns" placeholder="9780140328721"></textarea>
         <div id="isbnCounter" class="meta">Erkannte ISBNs: 0</div>
       </section>
       <section class="statusPanel">
