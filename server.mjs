@@ -348,6 +348,127 @@ async function fetchDnb(isbn) {
   }
 }
 
+function decodeXmlEntities(value) {
+  return String(value || '')
+    .replaceAll('&amp;', '&')
+    .replaceAll('&lt;', '<')
+    .replaceAll('&gt;', '>')
+    .replaceAll('&quot;', '"')
+    .replaceAll('&apos;', "'")
+    .trim();
+}
+
+function stripMarcPunctuation(value) {
+  return String(value || '').replace(/[\s\/:;,.]+$/g, '').trim();
+}
+
+function buildCoverPlaceholderDataUrl(isbn) {
+  const label = String(isbn || '').trim() || 'ISBN';
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="360" height="540" viewBox="0 0 360 540"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#e2e8f0"/><stop offset="1" stop-color="#cbd5e1"/></linearGradient></defs><rect width="360" height="540" fill="url(#g)"/><rect x="30" y="30" width="300" height="480" rx="18" fill="#f8fafc" stroke="#94a3b8" stroke-width="2"/><text x="180" y="230" text-anchor="middle" font-family="Arial, sans-serif" font-size="26" fill="#334155">Kein Cover</text><text x="180" y="275" text-anchor="middle" font-family="Arial, sans-serif" font-size="16" fill="#475569">${xmlEscape(label)}</text></svg>`;
+  return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
+}
+
+async function urlLooksLikeImage(url) {
+  if (!url) return false;
+  try {
+    const headRes = await fetch(url, { method: 'HEAD' });
+    if (headRes.ok) {
+      const contentType = String(headRes.headers.get('content-type') || '').toLowerCase();
+      return contentType.startsWith('image/');
+    }
+  } catch {
+    // Some providers do not support HEAD reliably.
+  }
+
+  try {
+    const getRes = await fetch(url);
+    if (!getRes.ok) return false;
+    const contentType = String(getRes.headers.get('content-type') || '').toLowerCase();
+    return contentType.startsWith('image/');
+  } catch {
+    return false;
+  }
+}
+
+async function resolveCoverUrl(isbn, ol, gg) {
+  const googleCover = gg.googleDoc?.imageLinks?.thumbnail || gg.googleDoc?.imageLinks?.smallThumbnail || '';
+  if (googleCover) {
+    return googleCover;
+  }
+
+  const openLibraryDirect = ol.bookDoc?.cover?.large || ol.bookDoc?.cover?.medium || ol.bookDoc?.cover?.small || '';
+  if (openLibraryDirect) {
+    return openLibraryDirect;
+  }
+
+  const openLibraryByIsbn = `https://covers.openlibrary.org/b/isbn/${isbn}-L.jpg`;
+  if (await urlLooksLikeImage(openLibraryByIsbn)) {
+    return openLibraryByIsbn;
+  }
+
+  return buildCoverPlaceholderDataUrl(isbn);
+}
+
+function parseDnbMarcXml(xmlText) {
+  const xml = String(xmlText || '');
+  if (!xml) {
+    return {
+      title: '',
+      publisher: '',
+      publishDate: '',
+      pageCount: '',
+      languageCode: '',
+      summary: '',
+      dnbId: '',
+    };
+  }
+
+  const fields = [];
+  const datafieldRegex = /<datafield\b[^>]*tag="(\d{3})"[^>]*>([\s\S]*?)<\/datafield>/g;
+  for (const match of xml.matchAll(datafieldRegex)) {
+    fields.push({ tag: match[1], body: match[2] });
+  }
+
+  function firstSubfield(tag, code) {
+    for (const field of fields) {
+      if (field.tag !== tag) continue;
+      const subRegex = new RegExp(`<subfield\\b[^>]*code="${code}"[^>]*>([\\s\\S]*?)<\\/subfield>`, 'i');
+      const subMatch = field.body.match(subRegex);
+      if (subMatch?.[1]) {
+        return decodeXmlEntities(subMatch[1]);
+      }
+    }
+    return '';
+  }
+
+  const titleA = stripMarcPunctuation(firstSubfield('245', 'a'));
+  const titleB = stripMarcPunctuation(firstSubfield('245', 'b'));
+  const publisher264 = stripMarcPunctuation(firstSubfield('264', 'b'));
+  const publisher260 = stripMarcPunctuation(firstSubfield('260', 'b'));
+  const publishDate264 = stripMarcPunctuation(firstSubfield('264', 'c'));
+  const publishDate260 = stripMarcPunctuation(firstSubfield('260', 'c'));
+  const pages = stripMarcPunctuation(firstSubfield('300', 'a'));
+  const language041 = stripMarcPunctuation(firstSubfield('041', 'a')).toLowerCase();
+  const summary520 = decodeXmlEntities(firstSubfield('520', 'a'));
+  const dnbId = stripMarcPunctuation(firstSubfield('035', 'a'));
+
+  const control008Match = xml.match(/<controlfield\b[^>]*tag="008"[^>]*>([\s\S]*?)<\/controlfield>/i);
+  const control008 = decodeXmlEntities(control008Match?.[1] || '').replace(/\s+/g, '');
+  const language008 = control008.length >= 38 ? control008.slice(35, 38).toLowerCase() : '';
+
+  const title = [titleA, titleB].filter(Boolean).join(' : ');
+
+  return {
+    title,
+    publisher: publisher264 || publisher260,
+    publishDate: publishDate264 || publishDate260,
+    pageCount: pages,
+    languageCode: language041 || language008,
+    summary: summary520,
+    dnbId,
+  };
+}
+
 function tagDataField(tag, ind1, ind2, subfields) {
   const body = subfields
     .filter((s) => s?.value)
@@ -358,13 +479,14 @@ function tagDataField(tag, ind1, ind2, subfields) {
 
 async function enrichByIsbn(isbn, prefer) {
   const [ol, gg, dnb] = await Promise.all([fetchOpenLibrary(isbn), fetchGoogle(isbn), fetchDnb(isbn)]);
+  const dnbParsed = parseDnbMarcXml(dnb.dnbXml);
   const order = buildSourceOrder(prefer);
 
   const title = pickBySourceOrder(
     {
       openlibrary: ol.bookDoc?.title || ol.doc?.title || '',
       google: gg.googleDoc?.title || '',
-      dnb: ''
+      dnb: dnbParsed.title || ''
     },
     order,
   );
@@ -373,7 +495,7 @@ async function enrichByIsbn(isbn, prefer) {
     {
       openlibrary: ol.bookDoc?.publishers?.[0]?.name || ol.doc?.publisher?.[0] || '',
       google: gg.googleDoc?.publisher || '',
-      dnb: ''
+      dnb: dnbParsed.publisher || ''
     },
     order,
   );
@@ -382,7 +504,7 @@ async function enrichByIsbn(isbn, prefer) {
     {
       openlibrary: ol.bookDoc?.publish_date || '',
       google: gg.googleDoc?.publishedDate || '',
-      dnb: ''
+      dnb: dnbParsed.publishDate || ''
     },
     order,
   );
@@ -391,7 +513,7 @@ async function enrichByIsbn(isbn, prefer) {
     {
       openlibrary: ol.bookDoc?.number_of_pages || ol.doc?.number_of_pages_median || '',
       google: gg.googleDoc?.pageCount || '',
-      dnb: ''
+      dnb: dnbParsed.pageCount || ''
     },
     order,
   );
@@ -400,7 +522,7 @@ async function enrichByIsbn(isbn, prefer) {
     {
       openlibrary: ol.bookDoc?.languages?.[0]?.key?.split('/').pop() || ol.doc?.language?.[0] || '',
       google: gg.googleDoc?.language || '',
-      dnb: ''
+      dnb: dnbParsed.languageCode || ''
     },
     order,
   );
@@ -408,20 +530,13 @@ async function enrichByIsbn(isbn, prefer) {
   const languageCode = normalizeLanguageCode(languageRaw);
   const languageNorm = mapLanguageName(languageCode);
 
-  const coverUrl = pickBySourceOrder(
-    {
-      openlibrary: ol.bookDoc?.cover?.large || ol.bookDoc?.cover?.medium || ol.bookDoc?.cover?.small || `https://covers.openlibrary.org/b/isbn/${isbn}-L.jpg`,
-      google: gg.googleDoc?.imageLinks?.thumbnail || gg.googleDoc?.imageLinks?.smallThumbnail || '',
-      dnb: ''
-    },
-    order,
-  );
+  const coverUrl = await resolveCoverUrl(isbn, ol, gg);
 
   const summary = pickBySourceOrder(
     {
       openlibrary: typeof ol.bookDoc?.notes === 'string' ? ol.bookDoc.notes : '',
       google: gg.googleDoc?.description || '',
-      dnb: ''
+      dnb: dnbParsed.summary || ''
     },
     order,
   );
@@ -437,6 +552,7 @@ async function enrichByIsbn(isbn, prefer) {
   }
   if (gg.googleId) identifiers.push(`GOOGLE:${gg.googleId}`);
   if (ol.doc?.key) identifiers.push(`OL_WORK:${ol.doc.key}`);
+  if (dnbParsed.dnbId) identifiers.push(`DNB:${dnbParsed.dnbId}`);
 
   return {
     isbn,
@@ -452,8 +568,15 @@ async function enrichByIsbn(isbn, prefer) {
     summary,
     coverUrl,
     identifiers: dedupe(identifiers).join('; '),
-    sourceUrl: ol.searchUrl,
-    raw: { ol, gg, dnb }
+    sourceUrl: pickBySourceOrder(
+      {
+        openlibrary: ol.searchUrl,
+        google: gg.googleUrl,
+        dnb: dnb.dnbUrl,
+      },
+      order,
+    ),
+    raw: { ol, gg, dnb, dnbParsed }
   };
 }
 
