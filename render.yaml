@@ -1,0 +1,15 @@
+services:
+  - type: web
+    name: bib-schreibshop
+    runtime: node
+    rootDir: bib-schreibshop
+    plan: starter
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: NODE_VERSION
+        value: 20
+      - key: GOOGLE_BOOKS_API_KEY
+        sync: false

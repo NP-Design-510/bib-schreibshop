@@ -1,0 +1,17 @@
+{
+  "name": "bib-schreibshop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node server.mjs",
+    "start": "node server.mjs",
+    "build": "node scripts/build-export.mjs",
+    "build:zip": "npm run build && powershell -NoProfile -Command \"Compress-Archive -Path 'build-export\\*' -DestinationPath 'build-export.zip' -Force\""
+  },
+  "dependencies": {
+    "archiver": "^7.0.1",
+    "exceljs": "^4.4.0",
+    "express": "^4.21.2"
+  }
+}
