@@ -70,18 +70,21 @@
       min-width: 0;
     }
     .scanPanel h2,
-    .statusPanel h2 {
+    .statusPanel h2,
+    .logSection h2,
+    .coversSection h2 {
       margin: 0 0 8px;
       font-size: 1rem;
       color: #334155;
+      letter-spacing: .01em;
     }
     .scanPanel {
       width: fit-content;
     }
     .scanPanel textarea {
-      width: calc(15ch + 26px);
-      min-width: calc(15ch + 26px);
-      max-width: calc(15ch + 26px);
+      width: calc(18ch + 26px);
+      min-width: calc(18ch + 26px);
+      max-width: calc(18ch + 26px);
       font-family: "Consolas", "Courier New", monospace;
     }
     .liveList {
@@ -96,13 +99,13 @@
     }
     .liveRow {
       display: flex;
-      align-items: center;
+      align-items: flex-start;
       gap: 8px;
       min-height: var(--scan-line-height, 23px);
-      height: var(--scan-line-height, 23px);
+      height: auto;
       padding: 0;
       font-size: .95rem;
-      line-height: 1;
+      line-height: 1.15;
     }
     .liveRow.ok .titleMuted { color: #166534; font-weight: 600; }
     .liveRow.loading .titleMuted { color: #92400e; }
@@ -114,7 +117,7 @@
     .titleMuted { color: #64748b; }
     .titleCell {
       display: flex;
-      align-items: center;
+      align-items: flex-start;
       gap: 8px;
       flex-wrap: nowrap;
       min-width: 0;
@@ -144,6 +147,35 @@
       min-width: 0;
       max-width: 100%;
     }
+    .titleText {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      min-width: 0;
+      width: 100%;
+    }
+    .titlePrimary {
+      color: #1f2937;
+      font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      min-width: 0;
+    }
+    .titleSecondary {
+      color: #64748b;
+      font-size: .86rem;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      min-width: 0;
+    }
+    .titleSource {
+      color: #0f766e;
+      font-size: .78rem;
+      font-weight: 700;
+      letter-spacing: .01em;
+    }
     .row {
       display: grid;
       grid-template-columns: minmax(160px, 1fr) minmax(160px, 1fr) auto;
@@ -157,10 +189,6 @@
       gap: 10px;
       justify-self: end;
       min-width: 0;
-    }
-    #passcode {
-      width: 140px;
-      min-width: 140px;
     }
     .actions {
       display: flex;
@@ -184,9 +212,7 @@
       padding-top: 12px;
     }
     .coversSection h2 {
-      margin: 0 0 10px;
-      font-size: 1rem;
-      color: #334155;
+      margin-bottom: 10px;
     }
     .coverGrid {
       display: grid;
@@ -198,6 +224,9 @@
       border-radius: 10px;
       background: #fff;
       padding: 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
     }
     .coverCard img {
       width: 100%;
@@ -208,12 +237,62 @@
       border: 1px solid #e2e8f0;
     }
     .coverTitle {
-      margin-top: 6px;
       font-size: .82rem;
-      color: #334155;
-      white-space: nowrap;
+      color: #1f2937;
+      font-weight: 600;
+      white-space: normal;
+      line-height: 1.25;
+      display: -webkit-box;
+      -webkit-line-clamp: 3;
+      -webkit-box-orient: vertical;
       overflow: hidden;
-      text-overflow: ellipsis;
+    }
+    .coverMeta {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 8px;
+      font-size: .72rem;
+      color: #64748b;
+    }
+    .coverSource {
+      padding: 2px 6px;
+      border-radius: 999px;
+      background: #eef2f7;
+      border: 1px solid #dbe2ec;
+      color: #0f766e;
+      font-weight: 700;
+      letter-spacing: .01em;
+      white-space: nowrap;
+    }
+    .logSection {
+      margin-top: 14px;
+      border-top: 1px solid var(--line);
+      padding-top: 12px;
+    }
+    .logSection h2 {
+      margin-bottom: 10px;
+    }
+    .logList {
+      min-height: auto;
+      max-height: 260px;
+    }
+    .logList .liveRow {
+      min-height: 0;
+      height: auto;
+      padding: 6px 0;
+    }
+    .logList .liveRow.ok .titleMuted { color: #166534; font-weight: 600; }
+    .logList .liveRow.loading .titleMuted { color: #92400e; }
+    .logList .liveRow.not_found .titleMuted,
+    .logList .liveRow.invalid .titleMuted,
+    .logList .liveRow.error .titleMuted,
+    .logList .liveRow.auth .titleMuted,
+    .logList .liveRow.rate .titleMuted { color: #b91c1c; }
+    .logList .titleMuted {
+      white-space: normal;
+      overflow: visible;
+      text-overflow: clip;
     }
     select, input, button {
       border: 1px solid var(--line);
@@ -237,16 +316,33 @@
       min-height: 20px;
       white-space: pre-wrap;
     }
+    .sourceLegend {
+      margin-top: 8px;
+      font-size: .9rem;
+      color: #475569;
+      display: flex;
+      gap: 8px 12px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+    .sourceLegend strong {
+      color: #334155;
+      font-weight: 700;
+    }
+    .sourceLegend code {
+      background: #eef2f7;
+      border: 1px solid #dbe2ec;
+      border-radius: 6px;
+      padding: 1px 6px;
+      font-size: .82rem;
+      color: #1e293b;
+    }
     @media (max-width: 700px) {
       .scanLayout { grid-template-columns: 1fr; }
       .row { grid-template-columns: 1fr; }
       .exportControls {
         justify-self: stretch;
         flex-wrap: wrap;
-      }
-      #passcode {
-        width: 100%;
-        min-width: 0;
       }
       .actions {
         width: 100%;
@@ -278,6 +374,8 @@
         <option value="auto">Priorität: Auto</option>
         <option value="google">Priorität: Google Books</option>
         <option value="dnb">Priorität: DNB</option>
+        <option value="loc">Priorität: Library of Congress</option>
+        <option value="bnb">Priorität: British National Bibliography (BNB)</option>
         <option value="openlibrary">Priorität: OpenLibrary</option>
       </select>
       <select id="hint">
@@ -285,7 +383,6 @@
         <option value="manual">Modus: Manuell</option>
       </select>
       <div class="exportControls">
-        <input id="passcode" type="password" placeholder="Passcode (optional)">
         <div class="actions">
           <button id="zipBtn" type="button">ZIP Export</button>
           <button id="marcBtn" type="button">Nur MARC21</button>
@@ -294,12 +391,24 @@
       </div>
     </div>
 
+    <div class="sourceLegend" aria-label="Quellenkuerzel Legende">
+      <strong>Quellen:</strong>
+      <span><code>[BNB]</code> British National Bibliography</span>
+      <span><code>[LOC]</code> Library of Congress</span>
+      <span><code>[DNB]</code> Deutsche Nationalbibliothek</span>
+      <span><code>[GOOGLE]</code> Google Books</span>
+      <span><code>[OL]</code> OpenLibrary</span>
+    </div>
+
     <section class="coversSection">
       <h2>Buchcover der gescannten ISBNs</h2>
       <div id="coverGrid" class="coverGrid"></div>
     </section>
 
-    <div id="log" class="log"></div>
+    <section class="logSection">
+      <h2>Export-Log</h2>
+      <div id="log" class="liveList logList"></div>
+    </section>
   </main>
 
   <script>
@@ -307,7 +416,6 @@
     const isbnCounter = document.getElementById('isbnCounter');
     const liveLookup = document.getElementById('liveLookup');
     const coverGrid = document.getElementById('coverGrid');
-    const passcodeInput = document.getElementById('passcode');
     const zipBtn = document.getElementById('zipBtn');
     const marcBtn = document.getElementById('marcBtn');
     const clearBtn = document.getElementById('clearBtn');
@@ -330,19 +438,18 @@
         .replaceAll("'", '&#39;');
     }
 
-    function requestPasscode(force = false) {
-      const current = passcodeInput.value.trim();
-      if (!force && current) {
-        return current;
+    function setLogEntries(entries) {
+      if (!entries.length) {
+        log.innerHTML = '<div class="emptyRow">Noch kein Export-Log vorhanden.</div>';
+        return;
       }
 
-      const entered = window.prompt('Bitte Passcode eingeben:', current || '');
-      if (entered === null) {
-        return '';
-      }
-
-      passcodeInput.value = String(entered).trim();
-      return passcodeInput.value;
+      log.innerHTML = entries.map((entry) => {
+        const status = entry.status || 'info';
+        const label = entry.label || (status === 'ok' ? 'ok' : status);
+        const message = entry.message || '';
+        return `<div class="liveRow ${status}"><div class="titleCell"><span class="statusPill ${status}">${escapeHtml(label)}</span><span class="titleMuted">${escapeHtml(message)}</span></div></div>`;
+      }).join('');
     }
 
     function extractIsbn(line) {
@@ -362,6 +469,14 @@
 
       const match10 = normalized.match(/[0-9]{9}[0-9X]/);
       return match10 ? match10[0] : '';
+    }
+
+    function splitLiveTitle(value) {
+      const text = String(value || '').trim();
+      if (!text) return { primary: '', secondary: '' };
+      const parts = text.split(' - ');
+      if (parts.length < 2) return { primary: text, secondary: '' };
+      return { primary: parts[0].trim(), secondary: parts.slice(1).join(' - ').trim() };
     }
 
     function updateIsbnCounter() {
@@ -410,7 +525,13 @@
           let title = 'Titel wird geladen ...';
           let label = 'laedt';
           if (cached?.status === 'ok') {
-            title = cached.title;
+            const sourceCode = String(cached.sourceUsed || '').toUpperCase();
+            const sourceLabel = sourceCode ? (sourceCode === 'OPENLIBRARY' ? 'OL' : sourceCode) : '';
+            const titleParts = splitLiveTitle(cached.title);
+            const baseTitle = titleParts.secondary
+              ? `${titleParts.primary || cached.title} - ${titleParts.secondary}`
+              : titleParts.primary || cached.title;
+            title = `${baseTitle}${cached.author ? ` - ${cached.author}` : ''}${sourceLabel ? ` [${sourceLabel}]` : ''}`;
             label = 'ok';
           } else if (cached?.status === 'not_found') {
             title = 'Kein Titel gefunden';
@@ -421,9 +542,6 @@
           } else if (cached?.status === 'error') {
             title = 'Fehler beim Abruf';
             label = 'fehler';
-          } else if (cached?.status === 'auth') {
-            title = 'Passcode fehlt oder ist falsch';
-            label = 'passcode';
           } else if (cached?.status === 'rate') {
             title = 'Zu viele Anfragen, bitte kurz warten';
             label = 'limit';
@@ -447,7 +565,10 @@
 
           const coverUrl = item.coverUrl || `https://covers.openlibrary.org/b/isbn/${isbn}-L.jpg`;
           const title = item.title || isbn;
-          return `<article class="coverCard"><img src="${escapeHtml(coverUrl)}" alt="Cover: ${escapeHtml(title)}" loading="lazy"><div class="coverTitle">${escapeHtml(title)}</div></article>`;
+          const titleParts = splitLiveTitle(title);
+          const sourceCode = String(item.sourceUsed || '').toUpperCase();
+          const sourceLabel = sourceCode ? (sourceCode === 'OPENLIBRARY' ? 'OL' : sourceCode) : '';
+          return `<article class="coverCard"><img src="${escapeHtml(coverUrl)}" alt="Cover: ${escapeHtml(title)}" loading="lazy"><div class="coverTitle">${escapeHtml(titleParts.primary || title)}</div>${titleParts.secondary ? `<div class="titleSecondary">${escapeHtml(titleParts.secondary)}</div>` : ''}<div class="coverMeta"><span>${escapeHtml(isbn)}</span>${sourceLabel ? `<span class="coverSource">${escapeHtml(sourceLabel)}</span>` : ''}</div></article>`;
         })
         .filter(Boolean)
         .join('');
@@ -464,23 +585,15 @@
 
     async function runLookup(isbns) {
       const uncached = isbns.filter((isbn) => {
-        const status = titleCache.get(isbn)?.status;
-        return !status || status === 'error' || status === 'auth' || status === 'rate';
+        const cached = titleCache.get(isbn);
+        const status = cached?.status;
+        return !status || status === 'error' || status === 'rate' || (status === 'ok' && !cached?.sourceUsed);
       });
       if (!uncached.length) {
         return;
       }
 
       const prefer = document.getElementById('prefer').value;
-      const passcode = passcodeInput.value.trim();
-
-      if (!passcode) {
-        for (const isbn of uncached) {
-          titleCache.set(isbn, { status: 'auth' });
-        }
-        renderLiveLookup(isbnInput.value.split(/\r?\n/));
-        return;
-      }
 
       for (const isbn of uncached) {
         titleCache.set(isbn, { status: 'loading' });
@@ -491,14 +604,12 @@
         const res = await fetch('/api/lookup', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ isbns: uncached, prefer, passcode })
+          body: JSON.stringify({ isbns: uncached, prefer })
         });
 
         if (!res.ok) {
           let status = 'error';
-          if (res.status === 401) {
-            status = 'auth';
-          } else if (res.status === 429) {
+          if (res.status === 429) {
             status = 'rate';
           }
           for (const isbn of uncached) {
@@ -513,6 +624,8 @@
           titleCache.set(entry.isbn, {
             status: entry.status,
             title: entry.title || '',
+            author: entry.author || '',
+            sourceUsed: entry.sourceUsed || '',
             coverUrl: entry.coverUrl || ''
           });
         }
@@ -528,27 +641,21 @@
     async function runExport(format) {
       const isbns = isbnInput.value;
       const prefer = document.getElementById('prefer').value;
-      const passcode = requestPasscode(false);
 
       if (!isbns.trim()) {
-        log.textContent = 'Bitte mindestens eine ISBN eingeben.';
-        return;
-      }
-
-      if (!passcode) {
-        log.textContent = 'Passcode erforderlich.';
+        setLogEntries([{ status: 'error', label: 'fehler', message: 'Bitte mindestens eine ISBN eingeben.' }]);
         return;
       }
 
       zipBtn.disabled = true;
       marcBtn.disabled = true;
-      log.textContent = format === 'marc21' ? 'MARC21 Export laeuft ...' : 'ZIP Export laeuft ...';
+      setLogEntries([{ status: 'loading', label: 'läuft', message: format === 'marc21' ? 'MARC21 Export läuft ...' : 'ZIP Export läuft ...' }]);
 
       try {
         const res = await fetch('/api/export', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ isbns, prefer, format, passcode })
+          body: JSON.stringify({ isbns, prefer, format })
         });
 
         if (!res.ok) {
@@ -568,9 +675,12 @@
         a.remove();
         URL.revokeObjectURL(url);
 
-        log.textContent = 'Fertig. Download gestartet.';
+        setLogEntries([
+          { status: 'ok', label: 'ok', message: 'Fertig. Download gestartet.' },
+          { status: 'info', label: 'info', message: `Verarbeitet: ${Array.from(new Set(isbns.split(/\r?\n/).map((line) => extractIsbn(line)).filter(Boolean))).length} ISBNs` },
+        ]);
       } catch (e) {
-        log.textContent = `Fehler: ${e.message}`;
+        setLogEntries([{ status: 'error', label: 'fehler', message: `Fehler: ${e.message}` }]);
       } finally {
         zipBtn.disabled = false;
         marcBtn.disabled = false;
@@ -586,7 +696,7 @@
       liveLookup.innerHTML = '';
       coverGrid.innerHTML = '<div class="emptyRow">Noch keine Cover vorhanden.</div>';
       isbnCounter.textContent = 'Erkannte ISBNs: 0';
-      log.textContent = 'Scans gelöscht.';
+      setLogEntries([{ status: 'info', label: 'info', message: 'Scans gelöscht.' }]);
       syncStatusLayout();
     });
     isbnInput.addEventListener('input', updateIsbnCounter);
@@ -595,13 +705,9 @@
       titleCache.clear();
       updateIsbnCounter();
     });
-    passcodeInput.addEventListener('change', () => {
-      titleCache.clear();
-      updateIsbnCounter();
-    });
     syncStatusLayout();
     updateIsbnCounter();
-    requestPasscode(true);
+    setLogEntries([]);
   </script>
 </body>
 </html>

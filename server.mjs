@@ -7,10 +7,11 @@ import { fileURLToPath } from 'node:url';
 
 const app = express();
 const port = process.env.PORT || 8787;
-const EXPORT_PASSCODE = process.env.EXPORT_PASSCODE || 'phorms';
 const RATE_WINDOW_MS = Number(process.env.RATE_LIMIT_WINDOW_MS || 60000);
 const RATE_LIMIT_MAX = Number(process.env.RATE_LIMIT_MAX || 12);
 const LOOKUP_RATE_LIMIT_MAX = Number(process.env.LOOKUP_RATE_LIMIT_MAX || 180);
+const LOC_SRU_BASE_URL = process.env.LOC_SRU_BASE_URL || 'https://lx2.loc.gov:210/LCDB';
+const BNB_BASE_URL = process.env.BNB_BASE_URL || 'https://bnb.data.bl.uk';
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = resolve(SCRIPT_DIR, 'public');
 const LOG_DIR = resolve(SCRIPT_DIR, 'logs');
@@ -77,12 +78,8 @@ async function writeAuditLog(entry) {
   }
 }
 
-function isAuthorized(req) {
-  if (!EXPORT_PASSCODE) {
-    return true;
-  }
-  const provided = String(req.headers['x-export-passcode'] || req.query?.passcode || req.body?.passcode || '').trim();
-  return provided === EXPORT_PASSCODE;
+function isAuthorized(_req) {
+  return true;
 }
 
 async function readAuditEntries() {
@@ -225,6 +222,70 @@ function dedupe(values) {
   return [...new Set(values.filter(Boolean))];
 }
 
+function normalizeAuthorName(value) {
+  const raw = String(value || '').trim().replace(/\s+/g, ' ');
+  if (!raw || raw.includes(',')) return raw;
+
+  if (/\b(verlag|press|publishing|publisher|inc\.?|ltd\.?|llc|gmbh|ag|university|society|department|studio|media|books?)\b/i.test(raw)) {
+    return raw;
+  }
+
+  const parts = raw.split(' ');
+  if (parts.length < 2) return raw;
+
+  const particles = new Set(['von', 'van', 'de', 'del', 'der', 'den', 'da', 'di', 'du', 'la', 'le']);
+  const surname = [parts.pop()];
+  if (parts.length && particles.has(parts[parts.length - 1].toLowerCase())) {
+    surname.unshift(parts.pop());
+  }
+
+  const given = parts.join(' ').trim();
+  if (!given) return raw;
+  return `${surname.join(' ')}, ${given}`;
+}
+
+function normalizePersonList(values) {
+  const list = Array.isArray(values) ? values : [values];
+  return dedupe(
+    list
+      .map((value) => normalizeAuthorName(value))
+      .filter(Boolean),
+  );
+}
+
+function formatMarcExtent(value) {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  if (/\b(seiten|s\.|pages|p\.)\b/i.test(text)) return text;
+  return /^\d+$/.test(text) ? `${text} Seiten` : text;
+}
+
+function escapeRegExp(value) {
+  return String(value || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function formatMultipartTitle(title, seriesTitle, seriesVolume) {
+  const baseTitle = String(title || '').trim();
+  const series = String(seriesTitle || '').trim();
+  const volume = String(seriesVolume || '').trim();
+  if (!baseTitle || !series || !volume) return baseTitle;
+
+  let partTitle = '';
+  const seriesPattern = new RegExp(`^${escapeRegExp(series)}\\s*(?:Band\\s*)?${escapeRegExp(volume)}\\s*[-:,.]\\s*(.+)$`, 'i');
+  const seriesMatch = baseTitle.match(seriesPattern);
+  if (seriesMatch?.[1]) {
+    partTitle = seriesMatch[1];
+  } else if (baseTitle.includes(' - ')) {
+    const split = baseTitle.split(' - ');
+    partTitle = split.slice(1).join(' - ');
+  }
+
+  partTitle = String(partTitle || '').split(' : ')[0].trim();
+  if (!partTitle) partTitle = baseTitle;
+
+  return `#${volume}, ${partTitle} - ${series}`;
+}
+
 function csvEscape(value) {
   const v = String(value ?? '');
   return `"${v.replaceAll('"', '""')}"`;
@@ -269,6 +330,34 @@ function normalizeLanguageCode(code) {
   return 'und';
 }
 
+function pickOpenLibraryLanguage(bookDoc, doc) {
+  const fromBook = (bookDoc?.languages || [])
+    .map((entry) => String(entry?.key || '').split('/').pop())
+    .filter(Boolean);
+  const fromSearch = Array.isArray(doc?.language) ? doc.language : [];
+  const normalized = dedupe([...fromBook, ...fromSearch].map((code) => normalizeLanguageCode(code)).filter((code) => code && code !== 'und'));
+  if (!normalized.length) return '';
+  if (normalized.includes('eng')) return 'eng';
+  return normalized[0];
+}
+
+function pickOpenLibrarySeriesTitle(workDoc, seriesDoc) {
+  const candidates = [
+    String(seriesDoc?.name || '').trim(),
+    String(seriesDoc?.title || '').trim(),
+    String(workDoc?.series?.[0]?.series?.name || '').trim(),
+  ].filter(Boolean);
+  return candidates[0] || '';
+}
+
+function pickOpenLibrarySeriesVolume(workDoc) {
+  const candidates = [
+    String(workDoc?.series?.[0]?.position || '').trim(),
+    String(workDoc?.series_number || '').trim(),
+  ].filter(Boolean);
+  return candidates[0] || '';
+}
+
 function pickBySourceOrder(sourceValues, order) {
   for (const source of order) {
     const value = sourceValues[source];
@@ -278,19 +367,38 @@ function pickBySourceOrder(sourceValues, order) {
   return '';
 }
 
+function pickSourceByOrder(sourceValues, order) {
+  for (const source of order) {
+    const value = sourceValues[source];
+    if (typeof value === 'number') return source;
+    if (String(value || '').trim()) return source;
+  }
+  return '';
+}
+
 function buildSourceOrder(prefer) {
-  if (prefer === 'google') return ['google', 'openlibrary', 'dnb'];
-  if (prefer === 'dnb') return ['dnb', 'openlibrary', 'google'];
-  if (prefer === 'openlibrary') return ['openlibrary', 'dnb', 'google'];
-  return ['openlibrary', 'dnb', 'google'];
+  if (prefer === 'google') return ['google', 'dnb', 'bnb', 'loc', 'openlibrary'];
+  if (prefer === 'dnb') return ['dnb', 'bnb', 'loc', 'openlibrary', 'google'];
+  if (prefer === 'openlibrary') return ['openlibrary', 'dnb', 'bnb', 'loc', 'google'];
+  if (prefer === 'loc') return ['loc', 'dnb', 'bnb', 'openlibrary', 'google'];
+  if (prefer === 'bnb') return ['bnb', 'dnb', 'loc', 'openlibrary', 'google'];
+  return ['dnb', 'bnb', 'loc', 'openlibrary', 'google'];
 }
 
 function normalizePrefer(prefer) {
   const value = String(prefer || 'auto').trim().toLowerCase();
-  if (value === 'google' || value === 'dnb' || value === 'openlibrary' || value === 'auto') {
+  if (value === 'google' || value === 'dnb' || value === 'openlibrary' || value === 'loc' || value === 'bnb' || value === 'auto') {
     return value;
   }
   return 'auto';
+}
+
+function pickContributorsBySourceOrder(sourceValues, order) {
+  for (const source of order) {
+    const values = Array.isArray(sourceValues[source]) ? sourceValues[source] : [];
+    if (values.length) return values;
+  }
+  return [];
 }
 
 function normalizeExportFormat(value) {
@@ -319,7 +427,29 @@ async function fetchOpenLibrary(isbn) {
     bookDoc = null;
   }
 
-  return { doc, bookDoc, searchUrl };
+  let workDoc = null;
+  let seriesDoc = null;
+  try {
+    const workKey = String(doc?.key || '').trim();
+    if (workKey) {
+      const workRes = await fetch(`https://openlibrary.org${workKey}.json`);
+      if (workRes.ok) {
+        workDoc = await workRes.json();
+        const seriesKey = String(workDoc?.series?.[0]?.series?.key || '').trim();
+        if (seriesKey) {
+          const seriesRes = await fetch(`https://openlibrary.org${seriesKey}.json`);
+          if (seriesRes.ok) {
+            seriesDoc = await seriesRes.json();
+          }
+        }
+      }
+    }
+  } catch {
+    workDoc = null;
+    seriesDoc = null;
+  }
+
+  return { doc, bookDoc, workDoc, seriesDoc, searchUrl };
 }
 
 async function fetchGoogle(isbn) {
@@ -346,6 +476,115 @@ async function fetchDnb(isbn) {
   } catch {
     return { dnbXml: '', dnbUrl };
   }
+}
+
+async function fetchLoc(isbn) {
+  const locUrl = `${LOC_SRU_BASE_URL}?version=1.1&operation=searchRetrieve&query=${encodeURIComponent(`bath.isbn=${isbn}`)}&recordSchema=marcxml&maximumRecords=1`;
+  try {
+    const res = await fetch(locUrl);
+    if (!res.ok) return { locXml: '', locUrl };
+    const xml = await res.text();
+    return { locXml: xml, locUrl };
+  } catch {
+    return { locXml: '', locUrl };
+  }
+}
+
+async function fetchBnb(isbn) {
+  const bnbUrl = `${BNB_BASE_URL.replace(/\/+$/, '')}/doc/resource/isbn/${encodeURIComponent(isbn)}.json`;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
+  try {
+    const res = await fetch(bnbUrl, {
+      signal: controller.signal,
+      headers: { Accept: 'application/ld+json, application/json;q=0.9' },
+    });
+    if (!res.ok) return { bnbJson: null, bnbUrl };
+    const json = await res.json();
+    return { bnbJson: json, bnbUrl };
+  } catch {
+    return { bnbJson: null, bnbUrl };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+function parseBnbJsonLd(payload) {
+  const graph = Array.isArray(payload?.['@graph'])
+    ? payload['@graph']
+    : Array.isArray(payload)
+      ? payload
+      : payload && typeof payload === 'object'
+        ? [payload]
+        : [];
+
+  const root = graph.find((n) => Object.keys(n || {}).some((k) => /title|isbn|publisher|creator|contributor/i.test(k))) || graph[0] || {};
+
+  function toArray(v) {
+    if (Array.isArray(v)) return v;
+    return v == null ? [] : [v];
+  }
+
+  function literal(v) {
+    if (v == null) return '';
+    if (typeof v === 'string') return v.trim();
+    if (typeof v === 'number') return String(v);
+    if (typeof v === 'object') {
+      if (typeof v['@value'] === 'string') return v['@value'].trim();
+      if (typeof v.value === 'string') return v.value.trim();
+      if (typeof v['@id'] === 'string') return v['@id'].trim();
+    }
+    return '';
+  }
+
+  function firstByKeyRegex(node, regex) {
+    for (const [k, v] of Object.entries(node || {})) {
+      if (!regex.test(k)) continue;
+      for (const item of toArray(v)) {
+        const text = literal(item);
+        if (text) return text;
+      }
+    }
+    return '';
+  }
+
+  function resolveNodeNameById(id) {
+    const target = graph.find((n) => n?.['@id'] === id);
+    if (!target) return '';
+    return firstByKeyRegex(target, /name|label|preferred/i);
+  }
+
+  function namesFromRel(regex) {
+    const names = [];
+    for (const [k, v] of Object.entries(root || {})) {
+      if (!regex.test(k)) continue;
+      for (const item of toArray(v)) {
+        if (item && typeof item === 'object' && typeof item['@id'] === 'string') {
+          const resolved = resolveNodeNameById(item['@id']);
+          if (resolved) names.push(resolved);
+        }
+        const text = literal(item);
+        if (text && !text.startsWith('http')) names.push(text);
+      }
+    }
+    return normalizePersonList(names);
+  }
+
+  return {
+    title: firstByKeyRegex(root, /title/i),
+    authors: namesFromRel(/creator|author/i),
+    contributors: [],
+    publishPlace: firstByKeyRegex(root, /spatial|place/i),
+    publisher: firstByKeyRegex(root, /publisher/i),
+    publishDate: firstByKeyRegex(root, /date|issued|publication/i),
+    pageCount: firstByKeyRegex(root, /extent|pagination|pages?/i),
+    edition: firstByKeyRegex(root, /edition/i),
+    seriesTitle: firstByKeyRegex(root, /series|ispartof/i),
+    seriesVolume: firstByKeyRegex(root, /partnumber|volume|numbering/i),
+    languageCode: firstByKeyRegex(root, /language/i),
+    summary: firstByKeyRegex(root, /description|summary|abstract/i),
+    dnbId: '',
+  };
 }
 
 function decodeXmlEntities(value) {
@@ -414,9 +653,13 @@ function parseDnbMarcXml(xmlText) {
   if (!xml) {
     return {
       title: '',
+      authors: [],
       publisher: '',
       publishDate: '',
       pageCount: '',
+      edition: '',
+      seriesTitle: '',
+      seriesVolume: '',
       languageCode: '',
       summary: '',
       dnbId: '',
@@ -441,16 +684,63 @@ function parseDnbMarcXml(xmlText) {
     return '';
   }
 
+  function allSubfields(tag, code) {
+    const values = [];
+    for (const field of fields) {
+      if (field.tag !== tag) continue;
+      const subRegex = new RegExp(`<subfield\\b[^>]*code="${code}"[^>]*>([\\s\\S]*?)<\\/subfield>`, 'ig');
+      for (const subMatch of field.body.matchAll(subRegex)) {
+        if (subMatch?.[1]) {
+          values.push(decodeXmlEntities(subMatch[1]));
+        }
+      }
+    }
+    return values;
+  }
+
+  function matchingFields(tags) {
+    return fields.filter((field) => tags.includes(field.tag));
+  }
+
+  function parseContributors(tags) {
+    return matchingFields(tags)
+      .map((field) => {
+        const name = decodeXmlEntities(field.body.match(/<subfield\b[^>]*code="a"[^>]*>([\s\S]*?)<\/subfield>/i)?.[1] || '');
+        const relatorCode = decodeXmlEntities(field.body.match(/<subfield\b[^>]*code="4"[^>]*>([\s\S]*?)<\/subfield>/i)?.[1] || '').toLowerCase();
+        const relatorText = decodeXmlEntities(field.body.match(/<subfield\b[^>]*code="e"[^>]*>([\s\S]*?)<\/subfield>/i)?.[1] || '').toLowerCase();
+        return {
+          tag: field.tag,
+          name: stripMarcPunctuation(name),
+          relatorCode,
+          relatorText,
+        };
+      })
+      .filter((entry) => entry.name);
+  }
+
   const titleA = stripMarcPunctuation(firstSubfield('245', 'a'));
   const titleB = stripMarcPunctuation(firstSubfield('245', 'b'));
+  const publishPlace264 = stripMarcPunctuation(firstSubfield('264', 'a'));
+  const publishPlace260 = stripMarcPunctuation(firstSubfield('260', 'a'));
   const publisher264 = stripMarcPunctuation(firstSubfield('264', 'b'));
   const publisher260 = stripMarcPunctuation(firstSubfield('260', 'b'));
   const publishDate264 = stripMarcPunctuation(firstSubfield('264', 'c'));
   const publishDate260 = stripMarcPunctuation(firstSubfield('260', 'c'));
   const pages = stripMarcPunctuation(firstSubfield('300', 'a'));
+  const edition = stripMarcPunctuation(firstSubfield('250', 'a'));
+  const seriesTitle490 = stripMarcPunctuation(firstSubfield('490', 'a'));
+  const seriesVolume490 = stripMarcPunctuation(firstSubfield('490', 'v'));
+  const seriesTitle830 = stripMarcPunctuation(firstSubfield('830', 'a'));
+  const seriesVolume830 = stripMarcPunctuation(firstSubfield('830', 'v'));
   const language041 = stripMarcPunctuation(firstSubfield('041', 'a')).toLowerCase();
   const summary520 = decodeXmlEntities(firstSubfield('520', 'a'));
   const dnbId = stripMarcPunctuation(firstSubfield('035', 'a'));
+  const contributors = parseContributors(['100', '110', '700', '710']);
+  const authors = normalizePersonList(
+    contributors
+      .filter((entry) => entry.relatorCode === 'aut' || /verfasser|author/.test(entry.relatorText))
+      .map((entry) => entry.name),
+  );
 
   const control008Match = xml.match(/<controlfield\b[^>]*tag="008"[^>]*>([\s\S]*?)<\/controlfield>/i);
   const control008 = decodeXmlEntities(control008Match?.[1] || '').replace(/\s+/g, '');
@@ -460,9 +750,15 @@ function parseDnbMarcXml(xmlText) {
 
   return {
     title,
+    authors,
+    contributors,
+    publishPlace: publishPlace264 || publishPlace260,
     publisher: publisher264 || publisher260,
     publishDate: publishDate264 || publishDate260,
     pageCount: pages,
+    edition,
+    seriesTitle: seriesTitle490 || seriesTitle830,
+    seriesVolume: seriesVolume490 || seriesVolume830,
     languageCode: language041 || language008,
     summary: summary520,
     dnbId,
@@ -478,24 +774,59 @@ function tagDataField(tag, ind1, ind2, subfields) {
 }
 
 async function enrichByIsbn(isbn, prefer) {
-  const [ol, gg, dnb] = await Promise.all([fetchOpenLibrary(isbn), fetchGoogle(isbn), fetchDnb(isbn)]);
+  const [ol, gg, dnb, loc, bnb] = await Promise.all([fetchOpenLibrary(isbn), fetchGoogle(isbn), fetchDnb(isbn), fetchLoc(isbn), fetchBnb(isbn)]);
   const dnbParsed = parseDnbMarcXml(dnb.dnbXml);
+  const locParsed = parseDnbMarcXml(loc.locXml);
+  const bnbParsed = parseBnbJsonLd(bnb.bnbJson);
   const order = buildSourceOrder(prefer);
 
-  const title = pickBySourceOrder(
-    {
-      openlibrary: ol.bookDoc?.title || ol.doc?.title || '',
-      google: gg.googleDoc?.title || '',
-      dnb: dnbParsed.title || ''
-    },
-    order,
-  );
+  const openLibraryAuthors = normalizePersonList([
+    ...(ol.bookDoc?.authors || []).map((author) => author?.name || ''),
+    ...(ol.doc?.author_name || []),
+  ]).join('; ');
+  const googleAuthors = normalizePersonList(gg.googleDoc?.authors || []).join('; ');
+  const dnbAuthors = normalizePersonList(dnbParsed.authors || []).join('; ');
+  const locAuthors = normalizePersonList(locParsed.authors || []).join('; ');
+  const bnbAuthors = normalizePersonList(bnbParsed.authors || []).join('; ');
+
+  const titleBySource = {
+    openlibrary: ol.bookDoc?.title || ol.doc?.title || '',
+    google: gg.googleDoc?.title || '',
+    dnb: dnbParsed.title || '',
+    loc: locParsed.title || '',
+    bnb: bnbParsed.title || ''
+  };
+  const title = pickBySourceOrder(titleBySource, order);
 
   const publisher = pickBySourceOrder(
     {
       openlibrary: ol.bookDoc?.publishers?.[0]?.name || ol.doc?.publisher?.[0] || '',
       google: gg.googleDoc?.publisher || '',
-      dnb: dnbParsed.publisher || ''
+      dnb: dnbParsed.publisher || '',
+      loc: locParsed.publisher || '',
+      bnb: bnbParsed.publisher || ''
+    },
+    order,
+  );
+
+  const publishPlace = pickBySourceOrder(
+    {
+      openlibrary: ol.bookDoc?.publish_places?.[0]?.name || '',
+      google: '',
+      dnb: dnbParsed.publishPlace || '',
+      loc: locParsed.publishPlace || '',
+      bnb: bnbParsed.publishPlace || ''
+    },
+    order,
+  );
+
+  const author = pickBySourceOrder(
+    {
+      openlibrary: openLibraryAuthors,
+      google: googleAuthors,
+      dnb: dnbAuthors,
+      loc: locAuthors,
+      bnb: bnbAuthors,
     },
     order,
   );
@@ -504,25 +835,66 @@ async function enrichByIsbn(isbn, prefer) {
     {
       openlibrary: ol.bookDoc?.publish_date || '',
       google: gg.googleDoc?.publishedDate || '',
-      dnb: dnbParsed.publishDate || ''
+      dnb: dnbParsed.publishDate || '',
+      loc: locParsed.publishDate || '',
+      bnb: bnbParsed.publishDate || ''
     },
     order,
   );
 
   const pageCount = pickBySourceOrder(
     {
-      openlibrary: ol.bookDoc?.number_of_pages || ol.doc?.number_of_pages_median || '',
+      openlibrary: ol.bookDoc?.pagination || ol.bookDoc?.number_of_pages || ol.doc?.number_of_pages_median || '',
       google: gg.googleDoc?.pageCount || '',
-      dnb: dnbParsed.pageCount || ''
+      dnb: dnbParsed.pageCount || '',
+      loc: locParsed.pageCount || '',
+      bnb: bnbParsed.pageCount || ''
     },
     order,
   );
 
+  const edition = pickBySourceOrder(
+    {
+      openlibrary: '',
+      google: '',
+      dnb: dnbParsed.edition || '',
+      loc: locParsed.edition || '',
+      bnb: bnbParsed.edition || ''
+    },
+    order,
+  );
+
+  const seriesTitle = pickBySourceOrder(
+    {
+      openlibrary: pickOpenLibrarySeriesTitle(ol.workDoc, ol.seriesDoc),
+      google: '',
+      dnb: dnbParsed.seriesTitle || '',
+      loc: locParsed.seriesTitle || '',
+      bnb: bnbParsed.seriesTitle || ''
+    },
+    order,
+  );
+
+  const seriesVolume = pickBySourceOrder(
+    {
+      openlibrary: pickOpenLibrarySeriesVolume(ol.workDoc),
+      google: '',
+      dnb: dnbParsed.seriesVolume || '',
+      loc: locParsed.seriesVolume || '',
+      bnb: bnbParsed.seriesVolume || ''
+    },
+    order,
+  );
+
+  const formattedTitle = formatMultipartTitle(title, seriesTitle, seriesVolume);
+
   const languageRaw = pickBySourceOrder(
     {
-      openlibrary: ol.bookDoc?.languages?.[0]?.key?.split('/').pop() || ol.doc?.language?.[0] || '',
+      openlibrary: pickOpenLibraryLanguage(ol.bookDoc, ol.doc),
       google: gg.googleDoc?.language || '',
-      dnb: dnbParsed.languageCode || ''
+      dnb: dnbParsed.languageCode || '',
+      loc: locParsed.languageCode || '',
+      bnb: bnbParsed.languageCode || ''
     },
     order,
   );
@@ -536,7 +908,9 @@ async function enrichByIsbn(isbn, prefer) {
     {
       openlibrary: typeof ol.bookDoc?.notes === 'string' ? ol.bookDoc.notes : '',
       google: gg.googleDoc?.description || '',
-      dnb: dnbParsed.summary || ''
+      dnb: dnbParsed.summary || '',
+      loc: locParsed.summary || '',
+      bnb: bnbParsed.summary || ''
     },
     order,
   );
@@ -553,14 +927,41 @@ async function enrichByIsbn(isbn, prefer) {
   if (gg.googleId) identifiers.push(`GOOGLE:${gg.googleId}`);
   if (ol.doc?.key) identifiers.push(`OL_WORK:${ol.doc.key}`);
   if (dnbParsed.dnbId) identifiers.push(`DNB:${dnbParsed.dnbId}`);
+  if (locParsed.dnbId) identifiers.push(`LOC:${locParsed.dnbId}`);
+  if (bnbParsed.dnbId) identifiers.push(`BNB:${bnbParsed.dnbId}`);
+
+  const contributors = pickContributorsBySourceOrder(
+    {
+      dnb: dnbParsed.contributors || [],
+      loc: locParsed.contributors || [],
+      bnb: bnbParsed.contributors || [],
+      openlibrary: [],
+      google: [],
+    },
+    order,
+  );
+
+  const sourceUrls = {
+    openlibrary: ol.searchUrl,
+    google: gg.googleUrl,
+    dnb: dnb.dnbUrl,
+    loc: loc.locUrl,
+    bnb: bnb.bnbJson ? bnb.bnbUrl : '',
+  };
+  const sourceUsed = pickSourceByOrder(titleBySource, order) || pickSourceByOrder(sourceUrls, order);
 
   return {
     isbn,
-    title,
+    title: formattedTitle,
+    author,
+    contributors,
     publisher,
-    publishPlace: '',
+    publishPlace,
     publishDate,
     pageCount,
+    edition,
+    seriesTitle,
+    seriesVolume,
     languageCode,
     languageNorm,
     targetAudience: String(gg.googleDoc?.maturityRating || '').toUpperCase() === 'NOT_MATURE' ? 'Kinder/Jugend' : '',
@@ -568,28 +969,50 @@ async function enrichByIsbn(isbn, prefer) {
     summary,
     coverUrl,
     identifiers: dedupe(identifiers).join('; '),
-    sourceUrl: pickBySourceOrder(
-      {
-        openlibrary: ol.searchUrl,
-        google: gg.googleUrl,
-        dnb: dnb.dnbUrl,
-      },
-      order,
-    ),
-    raw: { ol, gg, dnb, dnbParsed }
+    sourceUsed,
+    sourceUrl: pickBySourceOrder(sourceUrls, order),
+    raw: { ol, gg, dnb, dnbParsed, loc, locParsed, bnb, bnbParsed }
   };
 }
 
 function buildMarcRecord(row) {
+  const authors = normalizePersonList(String(row.author || '').split(';'));
+  const contributorRows = Array.isArray(row.contributors) ? row.contributors : [];
+
+  const dnbContributorFields = contributorRows
+    .map((entry) => {
+      const name = String(entry?.name || '').trim();
+      if (!name) return '';
+
+      const relatorCode = String(entry?.relatorCode || '').trim().toLowerCase();
+      const relatorText = String(entry?.relatorText || '').trim().toLowerCase();
+      const isAuthor = relatorCode === 'aut' || /verfasser|author/.test(relatorText);
+      const isPrimaryAuthor = authors[0] && name.toLowerCase() === authors[0].toLowerCase() && isAuthor;
+      if (isPrimaryAuthor) return '';
+
+      const tag = entry?.tag === '710' || entry?.tag === '110' ? '710' : '700';
+      return tagDataField(tag, tag === '710' ? '2' : '1', ' ', [
+        { code: 'a', value: name },
+        { code: '4', value: relatorCode },
+      ]);
+    })
+    .filter(Boolean);
+
   const datafields = [
     tagDataField('020', ' ', ' ', [{ code: 'a', value: row.isbn }]),
+    tagDataField('100', '1', ' ', [{ code: 'a', value: authors[0] || '' }]),
+    ...(dnbContributorFields.length
+      ? dnbContributorFields
+      : authors.slice(1).map((author) => tagDataField('700', '1', ' ', [{ code: 'a', value: author }, { code: '4', value: 'aut' }]))),
     tagDataField('245', '1', '0', [{ code: 'a', value: row.title }]),
+    tagDataField('250', ' ', ' ', [{ code: 'a', value: row.edition }]),
     tagDataField('264', ' ', '1', [
       { code: 'a', value: row.publishPlace },
       { code: 'b', value: row.publisher },
       { code: 'c', value: row.publishDate },
     ]),
-    tagDataField('300', ' ', ' ', [{ code: 'a', value: row.pageCount ? `${row.pageCount} Seiten` : '' }]),
+    tagDataField('300', ' ', ' ', [{ code: 'a', value: formatMarcExtent(row.pageCount) }]),
+    tagDataField('490', '0', ' ', [{ code: 'a', value: row.seriesTitle }, { code: 'v', value: row.seriesVolume }]),
     tagDataField('041', '0', ' ', [{ code: 'a', value: row.languageCode }]),
     tagDataField('546', ' ', ' ', [{ code: 'a', value: `Sprache: ${row.languageNorm}` }]),
     tagDataField('521', ' ', ' ', [{ code: 'a', value: row.targetAudience }]),
@@ -599,7 +1022,7 @@ function buildMarcRecord(row) {
     tagDataField('856', '4', '2', [{ code: 'u', value: row.coverUrl }, { code: 'y', value: 'Cover' }]),
   ].filter(Boolean);
 
-  return `  <record>\n    <leader>00000nam a2200000 i 4500</leader>\n    <controlfield tag="001">${xmlEscape(row.isbn)}</controlfield>\n    <controlfield tag="003">WEB</controlfield>\n${datafields.join('\n')}\n  </record>`;
+  return `  <record>\n    <leader>00000nam a2200000 i 4500</leader>\n    <controlfield tag="003">WEB</controlfield>\n${datafields.join('\n')}\n  </record>`;
 }
 
 async function rowsToXlsxBuffer(rows) {
@@ -608,6 +1031,10 @@ async function rowsToXlsxBuffer(rows) {
   ws.columns = [
     { header: 'isbn', key: 'isbn', width: 18 },
     { header: 'titel', key: 'title', width: 40 },
+    { header: 'verfasser', key: 'author', width: 32 },
+    { header: 'auflage', key: 'edition', width: 18 },
+    { header: 'gesamttitel', key: 'seriesTitle', width: 28 },
+    { header: 'bandnummer', key: 'seriesVolume', width: 14 },
     { header: 'verlag', key: 'publisher', width: 24 },
     { header: 'erscheinungsort', key: 'publishPlace', width: 24 },
     { header: 'erscheinungsdatum', key: 'publishDate', width: 20 },
@@ -706,8 +1133,10 @@ app.post('/api/lookup', async (req, res) => {
       results.push({
         isbn,
         title: row.title,
+        author: row.author,
         publisher: row.publisher,
         publishDate: row.publishDate,
+        sourceUsed: row.sourceUsed,
         coverUrl: row.coverUrl,
         status: 'ok',
       });
@@ -798,11 +1227,15 @@ app.post('/api/export', async (req, res) => {
       .map((r) => buildMarcRecord(r))
       .join('\n')}\n</collection>\n`;
 
-    const csvHeader = 'isbn,titel,verlag,erscheinungsort,erscheinungsdatum,seitenanzahl,sprache_code,sprache_normiert,zielgruppe,identifikatoren,kurzbeschreibung,zusammenfassung,cover_url';
+    const csvHeader = 'isbn,titel,verfasser,auflage,gesamttitel,bandnummer,verlag,erscheinungsort,erscheinungsdatum,seitenanzahl,sprache_code,sprache_normiert,zielgruppe,identifikatoren,kurzbeschreibung,zusammenfassung,cover_url';
     const csvRows = rows.map((r) =>
       [
         r.isbn,
         r.title,
+        r.author,
+        r.edition,
+        r.seriesTitle,
+        r.seriesVolume,
         r.publisher,
         r.publishPlace,
         r.publishDate,

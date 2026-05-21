@@ -57,6 +57,8 @@ Diese Option benoetigt keinen dauerhaft laufenden Node-Prozess auf deinem eigene
 	3. RATE_LIMIT_WINDOW_MS optional
 	4. RATE_LIMIT_MAX optional
 	5. LOOKUP_RATE_LIMIT_MAX optional
+	6. LOC_SRU_BASE_URL optional (Standard: https://lx2.loc.gov:210/LCDB)
+	7. BNB_BASE_URL optional (Standard: https://bnb.data.bl.uk)
 5. Deploy starten
 6. Eigene Domain (z. B. bib.schreibshop.de) in Vercel hinterlegen
 
@@ -86,7 +88,9 @@ Prefer Werte:
 1. auto
 2. google
 3. dnb
-4. openlibrary
+4. loc
+5. bnb
+6. openlibrary
 
 Format Werte:
 
@@ -98,6 +102,12 @@ Format Werte:
 GOOGLE_BOOKS_API_KEY=...
 
 Ohne Key funktioniert die App ebenfalls, nur mit moeglicher Rate-Limitierung.
+
+## Hinweis zu British Library / BNB
+
+1. Der fruehere Host sru.bl.uk ist nicht mehr verlaesslich verfuegbar.
+2. Die App nutzt deshalb BNB Linked Data unter bnb.data.bl.uk.
+3. Optional kann der Host ueber BNB_BASE_URL angepasst werden.
 
 ## Sicherheit (neu)
 
