@@ -358,6 +358,14 @@ function pickOpenLibrarySeriesVolume(workDoc) {
   return candidates[0] || '';
 }
 
+function pickOpenLibraryPublishPlace(bookDoc) {
+  const candidates = (bookDoc?.publish_places || [])
+    .map((entry) => String(entry?.name || '').trim())
+    .filter(Boolean);
+  const blocked = new Set(['usa', 'us', 'uk', 'united states', 'united kingdom', 'england', 'great britain']);
+  return candidates.find((value) => !blocked.has(value.toLowerCase())) || '';
+}
+
 function pickBySourceOrder(sourceValues, order) {
   for (const source of order) {
     const value = sourceValues[source];
@@ -811,7 +819,7 @@ async function enrichByIsbn(isbn, prefer) {
 
   const publishPlace = pickBySourceOrder(
     {
-      openlibrary: ol.bookDoc?.publish_places?.[0]?.name || '',
+      openlibrary: pickOpenLibraryPublishPlace(ol.bookDoc),
       google: '',
       dnb: dnbParsed.publishPlace || '',
       loc: locParsed.publishPlace || '',
