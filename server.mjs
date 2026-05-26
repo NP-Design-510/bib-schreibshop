@@ -1346,27 +1346,36 @@ app.post('/api/lookup', async (req, res) => {
 
     const results = [];
     for (const isbn of isbns) {
-      if (!isValidIsbn(isbn)) {
-        results.push({ isbn, title: '', status: 'invalid' });
-        continue;
-      }
+      try {
+        if (!isValidIsbn(isbn)) {
+          results.push({ isbn, title: '', status: 'invalid' });
+          continue;
+        }
 
-      const row = await enrichByIsbn(isbn, prefer);
-      if (!row.title) {
-        results.push({ isbn, title: '', status: 'not_found' });
-        continue;
-      }
+        const row = await enrichByIsbn(isbn, prefer);
+        if (!row.title) {
+          results.push({ isbn, title: '', status: 'not_found' });
+          continue;
+        }
 
-      results.push({
-        isbn,
-        title: row.title,
-        author: row.author,
-        publisher: row.publisher,
-        publishDate: row.publishDate,
-        sourceUsed: row.sourceUsed,
-        coverUrl: row.coverUrl,
-        status: 'ok',
-      });
+        results.push({
+          isbn,
+          title: row.title,
+          author: row.author,
+          publisher: row.publisher,
+          publishDate: row.publishDate,
+          sourceUsed: row.sourceUsed,
+          coverUrl: row.coverUrl,
+          status: 'ok',
+        });
+      } catch (error) {
+        results.push({
+          isbn,
+          title: '',
+          status: 'error',
+          error: error?.message || 'Lookup fehlgeschlagen',
+        });
+      }
     }
 
     await writeAuditLog({

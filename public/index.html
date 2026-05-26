@@ -540,7 +540,7 @@
             title = 'Ungueltige ISBN';
             label = 'ungueltig';
           } else if (cached?.status === 'error') {
-            title = 'Fehler beim Abruf';
+            title = cached?.errorMessage ? `Fehler beim Abruf: ${cached.errorMessage}` : 'Fehler beim Abruf';
             label = 'fehler';
           } else if (cached?.status === 'rate') {
             title = 'Zu viele Anfragen, bitte kurz warten';
@@ -626,12 +626,16 @@
             title: entry.title || '',
             author: entry.author || '',
             sourceUsed: entry.sourceUsed || '',
-            coverUrl: entry.coverUrl || ''
+            coverUrl: entry.coverUrl || '',
+            errorMessage: entry.error || ''
           });
         }
-      } catch {
+      } catch (error) {
         for (const isbn of uncached) {
-          titleCache.set(isbn, { status: 'error' });
+          titleCache.set(isbn, {
+            status: 'error',
+            errorMessage: error?.message || 'Unbekannter Netzwerkfehler'
+          });
         }
       }
 
