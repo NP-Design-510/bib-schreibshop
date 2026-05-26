@@ -10,7 +10,6 @@ const FILES_TO_COPY = [
   'server.mjs',
   'README.md',
   'Dockerfile',
-  '.dockerignore',
   'render.yaml',
   'fly.toml',
   'vercel.json',
@@ -20,12 +19,22 @@ const FILES_TO_COPY = [
   'lib',
 ];
 
+const OPTIONAL_FILES_TO_COPY = ['.dockerignore'];
+
 async function copyProjectFiles() {
   await rm(OUT_DIR, { recursive: true, force: true });
   await mkdir(OUT_DIR, { recursive: true });
 
   for (const entry of FILES_TO_COPY) {
     await cp(resolve(ROOT_DIR, entry), resolve(OUT_DIR, entry), { recursive: true });
+  }
+
+  for (const entry of OPTIONAL_FILES_TO_COPY) {
+    try {
+      await cp(resolve(ROOT_DIR, entry), resolve(OUT_DIR, entry), { recursive: true });
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw error;
+    }
   }
 }
 
