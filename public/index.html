@@ -617,6 +617,45 @@
       throw lastError || new Error('Netzwerkfehler');
     }
 
+    async function runDnbEnhancement(isbns, prefer) {
+      const candidates = isbns.filter((isbn) => {
+        const cached = titleCache.get(isbn);
+        if (!cached) return false;
+        if (cached.status === 'not_found') return true;
+        if (prefer === 'dnb' && cached.status === 'ok' && String(cached.sourceUsed || '').toLowerCase() !== 'dnb') return true;
+        return false;
+      });
+
+      if (!candidates.length) return;
+
+      const batchSize = 6;
+      for (let i = 0; i < candidates.length; i += batchSize) {
+        const batch = candidates.slice(i, i + batchSize);
+        try {
+          const res = await postJsonWithRetry('/api/lookup-dnb', { isbns: batch }, { retries: 1, timeoutMs: 18000 });
+          if (!res.ok) continue;
+
+          const payload = await res.json();
+          for (const entry of payload.results || []) {
+            if (entry.status !== 'ok') continue;
+            const cached = titleCache.get(entry.isbn) || {};
+            titleCache.set(entry.isbn, {
+              status: 'ok',
+              title: entry.title || cached.title || '',
+              author: entry.author || cached.author || '',
+              sourceUsed: entry.sourceUsed || cached.sourceUsed || '',
+              coverUrl: cached.coverUrl || entry.coverUrl || '',
+              errorMessage: ''
+            });
+          }
+
+          renderLiveLookup(isbnInput.value.split(/\r?\n/));
+        } catch {
+          // DNB enrichment is best-effort and intentionally silent in UI.
+        }
+      }
+    }
+
     async function runLookup(isbns) {
       const uncached = isbns.filter((isbn) => {
         const cached = titleCache.get(isbn);
@@ -693,6 +732,8 @@
 
         renderLiveLookup(isbnInput.value.split(/\r?\n/));
       }
+
+      void runDnbEnhancement(uncached, prefer);
 
       renderLiveLookup(isbnInput.value.split(/\r?\n/));
     }

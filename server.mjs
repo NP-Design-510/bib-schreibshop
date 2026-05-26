@@ -731,6 +731,18 @@ async function fetchDnb(isbn) {
   return { dnbXml: res.data, dnbUrl };
 }
 
+async function fetchDnbLookup(isbn) {
+  const dnbUrl = `https://services.dnb.de/sru/dnb?version=1.1&operation=searchRetrieve&query=${encodeURIComponent(`isbn=${isbn}`)}&recordSchema=MARC21-xml&maximumRecords=1`;
+  const res = await fetchWithRetry(dnbUrl, {
+    parse: 'text',
+    accept: 'application/xml, text/xml;q=0.9, */*;q=0.8',
+    retries: 0,
+    timeoutMs: 4500,
+  });
+  if (!res.ok) return { dnbXml: '', dnbUrl };
+  return { dnbXml: res.data, dnbUrl };
+}
+
 async function fetchLoc(isbn) {
   const locUrl = `${LOC_SRU_BASE_URL}?version=1.1&operation=searchRetrieve&query=${encodeURIComponent(`bath.isbn=${isbn}`)}&recordSchema=marcxml&maximumRecords=1`;
   const res = await fetchWithRetry(locUrl, { parse: 'text', accept: 'application/xml, text/xml;q=0.9, */*;q=0.8' });
@@ -1276,6 +1288,26 @@ async function enrichLookupByIsbn(isbn, prefer) {
   };
 }
 
+async function enrichLookupWithDnbByIsbn(isbn) {
+  const dnb = await fetchDnbLookup(isbn);
+  if (!dnb.dnbXml) return null;
+
+  const dnbParsed = parseDnbMarcXml(dnb.dnbXml);
+  const title = formatMultipartTitle(dnbParsed.title || '', dnbParsed.seriesTitle || '', dnbParsed.seriesVolume || '');
+  if (!title) return null;
+
+  return {
+    isbn,
+    title,
+    author: normalizePersonList(dnbParsed.authors || []).join('; '),
+    publisher: dnbParsed.publisher || '',
+    publishDate: dnbParsed.publishDate || '',
+    sourceUsed: 'dnb',
+    coverUrl: '',
+    sourceUrl: dnb.dnbUrl,
+  };
+}
+
 function buildMarcRecord(row) {
   const authors = normalizePersonList(String(row.author || '').split(';'));
   const contributorRows = Array.isArray(row.contributors) ? row.contributors : [];
@@ -1469,6 +1501,65 @@ app.post('/api/lookup', async (req, res) => {
       message: error.message,
       ip: getClientIp(req),
     });
+    return res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/lookup-dnb', async (req, res) => {
+  try {
+    const clientIp = getClientIp(req);
+
+    if (!isAuthorized(req)) {
+      await writeAuditLog({
+        ts: new Date().toISOString(),
+        event: 'auth_failed',
+        ip: clientIp,
+      });
+      return res.status(401).json({ error: 'Nicht autorisiert.' });
+    }
+
+    const inputValues = Array.isArray(req.body?.isbns)
+      ? req.body.isbns
+      : String(req.body?.isbns || '').split(/\r?\n/);
+
+    const isbns = dedupe(inputValues.map((line) => extractIsbn(line)).filter(Boolean)).slice(0, 60);
+    if (isbns.length === 0) {
+      return res.json({ results: [] });
+    }
+
+    const results = [];
+    for (const isbn of isbns) {
+      try {
+        if (!isValidIsbn(isbn)) continue;
+        const row = await enrichLookupWithDnbByIsbn(isbn);
+        if (!row?.title) continue;
+
+        results.push({
+          isbn,
+          title: row.title,
+          author: row.author,
+          publisher: row.publisher,
+          publishDate: row.publishDate,
+          sourceUsed: row.sourceUsed,
+          coverUrl: row.coverUrl,
+          sourceUrl: row.sourceUrl,
+          status: 'ok',
+        });
+      } catch {
+        // DNB enrichment is best-effort and should never break live lookup.
+      }
+    }
+
+    await writeAuditLog({
+      ts: new Date().toISOString(),
+      event: 'lookup_dnb_ok',
+      ip: clientIp,
+      inputCount: isbns.length,
+      foundCount: results.length,
+    });
+
+    return res.json({ results });
+  } catch (error) {
     return res.status(500).json({ error: error.message });
   }
 });
