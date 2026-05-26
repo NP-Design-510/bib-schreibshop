@@ -103,6 +103,18 @@ GOOGLE_BOOKS_API_KEY=...
 
 Ohne Key funktioniert die App ebenfalls, nur mit moeglicher Rate-Limitierung.
 
+Optionale Feinsteuerung fuer Google-Books-Stabilitaet:
+
+1. GOOGLE_CACHE_TTL_MS=3600000
+2. GOOGLE_MISS_CACHE_TTL_MS=600000
+3. GOOGLE_RATE_LIMIT_COOLDOWN_MS=120000
+
+Deployment-Hinweis:
+
+1. Render: in render.yaml ist GOOGLE_BOOKS_API_KEY bereits als Secret vorgesehen; den Wert im Render-Dashboard setzen.
+2. Fly.io: `flyctl secrets set GOOGLE_BOOKS_API_KEY=...`
+3. Vercel: im Project unter Environment Variables `GOOGLE_BOOKS_API_KEY` setzen und neu deployen.
+
 ## Hinweis zu British Library / BNB
 
 1. Der fruehere Host sru.bl.uk ist nicht mehr verlaesslich verfuegbar.

@@ -6,6 +6,7 @@ primary_region = "fra"
 
 [env]
   PORT = "8787"
+  # GOOGLE_BOOKS_API_KEY is intentionally managed via `flyctl secrets set`.
 
 [http_service]
   internal_port = 8787
