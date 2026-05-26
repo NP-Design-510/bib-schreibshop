@@ -634,43 +634,64 @@
       }
       renderLiveLookup(isbnInput.value.split(/\r?\n/));
 
-      try {
-        const res = await postJsonWithRetry('/api/lookup', { isbns: uncached, prefer }, { retries: 3, timeoutMs: 12000 });
+      const batchSize = 8;
+      const batches = [];
+      for (let i = 0; i < uncached.length; i += batchSize) {
+        batches.push(uncached.slice(i, i + batchSize));
+      }
 
-        if (!res.ok) {
-          let status = 'error';
-          if (res.status === 429) {
-            status = 'rate';
+      for (const batch of batches) {
+        try {
+          const timeoutMs = Math.min(45000, 12000 + batch.length * 2500);
+          const res = await postJsonWithRetry('/api/lookup', { isbns: batch, prefer }, { retries: 2, timeoutMs });
+
+          if (!res.ok) {
+            const status = res.status === 429 ? 'rate' : 'error';
+            const errPayload = await res.json().catch(() => null);
+            const errMessage = errPayload?.error || '';
+            for (const isbn of batch) {
+              titleCache.set(isbn, { status, errorMessage: errMessage });
+            }
+            renderLiveLookup(isbnInput.value.split(/\r?\n/));
+            continue;
           }
-          for (const isbn of uncached) {
-            titleCache.set(isbn, { status });
+
+          const payload = await res.json();
+          const seen = new Set();
+          for (const entry of payload.results || []) {
+            seen.add(entry.isbn);
+            titleCache.set(entry.isbn, {
+              status: entry.status,
+              title: entry.title || '',
+              author: entry.author || '',
+              sourceUsed: entry.sourceUsed || '',
+              coverUrl: entry.coverUrl || '',
+              errorMessage: entry.error || ''
+            });
           }
-          renderLiveLookup(isbnInput.value.split(/\r?\n/));
-          return;
+
+          for (const isbn of batch) {
+            if (!seen.has(isbn)) {
+              titleCache.set(isbn, {
+                status: 'error',
+                errorMessage: 'Leere Serverantwort fuer ISBN'
+              });
+            }
+          }
+        } catch (error) {
+          const baseMessage = error?.name === 'AbortError'
+            ? 'Zeitueberschreitung beim Serverabruf'
+            : (error?.message || 'Unbekannter Netzwerkfehler');
+          const userMessage = navigator.onLine ? baseMessage : 'Keine Internetverbindung';
+          for (const isbn of batch) {
+            titleCache.set(isbn, {
+              status: 'error',
+              errorMessage: userMessage
+            });
+          }
         }
 
-        const payload = await res.json();
-        for (const entry of payload.results || []) {
-          titleCache.set(entry.isbn, {
-            status: entry.status,
-            title: entry.title || '',
-            author: entry.author || '',
-            sourceUsed: entry.sourceUsed || '',
-            coverUrl: entry.coverUrl || '',
-            errorMessage: entry.error || ''
-          });
-        }
-      } catch (error) {
-        const baseMessage = error?.name === 'AbortError'
-          ? 'Zeitueberschreitung beim Serverabruf'
-          : (error?.message || 'Unbekannter Netzwerkfehler');
-        const userMessage = navigator.onLine ? baseMessage : 'Keine Internetverbindung';
-        for (const isbn of uncached) {
-          titleCache.set(isbn, {
-            status: 'error',
-            errorMessage: userMessage
-          });
-        }
+        renderLiveLookup(isbnInput.value.split(/\r?\n/));
       }
 
       renderLiveLookup(isbnInput.value.split(/\r?\n/));
