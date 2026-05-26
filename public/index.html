@@ -583,6 +583,40 @@
       lookupTimer = setTimeout(() => runLookup(isbns), 250);
     }
 
+    function waitMs(ms) {
+      return new Promise((resolve) => setTimeout(resolve, ms));
+    }
+
+    async function postJsonWithRetry(url, payload, options = {}) {
+      const retries = Number(options.retries ?? 2);
+      const timeoutMs = Number(options.timeoutMs ?? 12000);
+      let lastError = null;
+
+      for (let attempt = 0; attempt <= retries; attempt += 1) {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+          const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+            signal: controller.signal
+          });
+          return response;
+        } catch (error) {
+          lastError = error;
+          if (attempt < retries) {
+            await waitMs(350 * (attempt + 1));
+            continue;
+          }
+        } finally {
+          clearTimeout(timeout);
+        }
+      }
+
+      throw lastError || new Error('Netzwerkfehler');
+    }
+
     async function runLookup(isbns) {
       const uncached = isbns.filter((isbn) => {
         const cached = titleCache.get(isbn);
@@ -601,11 +635,7 @@
       renderLiveLookup(isbnInput.value.split(/\r?\n/));
 
       try {
-        const res = await fetch('/api/lookup', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ isbns: uncached, prefer })
-        });
+        const res = await postJsonWithRetry('/api/lookup', { isbns: uncached, prefer }, { retries: 3, timeoutMs: 12000 });
 
         if (!res.ok) {
           let status = 'error';
@@ -631,10 +661,14 @@
           });
         }
       } catch (error) {
+        const baseMessage = error?.name === 'AbortError'
+          ? 'Zeitueberschreitung beim Serverabruf'
+          : (error?.message || 'Unbekannter Netzwerkfehler');
+        const userMessage = navigator.onLine ? baseMessage : 'Keine Internetverbindung';
         for (const isbn of uncached) {
           titleCache.set(isbn, {
             status: 'error',
-            errorMessage: error?.message || 'Unbekannter Netzwerkfehler'
+            errorMessage: userMessage
           });
         }
       }
