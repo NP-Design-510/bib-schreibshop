@@ -669,6 +669,18 @@ async function fetchOpenLibrary(isbn) {
   return { doc, bookDoc, workDoc, seriesDoc, searchUrl: doc ? searchUrl : isbnUrl };
 }
 
+async function fetchOpenLibraryLookup(isbn) {
+  const booksUrl = `https://openlibrary.org/api/books?bibkeys=ISBN:${encodeURIComponent(isbn)}&format=json&jscmd=data`;
+  const booksRes = await fetchWithRetry(booksUrl, { parse: 'json', retries: 0, timeoutMs: 5000 });
+  const bookDoc = booksRes.ok ? booksRes.data?.[`ISBN:${isbn}`] ?? null : null;
+
+  const searchUrl = `https://openlibrary.org/search.json?isbn=${encodeURIComponent(isbn)}`;
+  const searchRes = await fetchWithRetry(searchUrl, { parse: 'json', retries: 0, timeoutMs: 5000 });
+  const doc = searchRes.ok ? searchRes.data?.docs?.[0] ?? null : null;
+
+  return { doc, bookDoc, searchUrl };
+}
+
 async function fetchGoogle(isbn) {
   const apiKey = process.env.GOOGLE_BOOKS_API_KEY;
   const googleUrl = `https://www.googleapis.com/books/v1/volumes?q=isbn:${encodeURIComponent(isbn)}${apiKey ? `&key=${encodeURIComponent(apiKey)}` : ''}`;
@@ -873,6 +885,17 @@ async function resolveCoverUrl(isbn, ol, gg) {
   }
 
   return buildCoverPlaceholderDataUrl(isbn);
+}
+
+function resolveLookupCoverUrl(isbn, ol, gg) {
+  return (
+    gg.googleDoc?.imageLinks?.thumbnail ||
+    gg.googleDoc?.imageLinks?.smallThumbnail ||
+    ol.bookDoc?.cover?.large ||
+    ol.bookDoc?.cover?.medium ||
+    ol.bookDoc?.cover?.small ||
+    `https://covers.openlibrary.org/b/isbn/${isbn}-L.jpg`
+  );
 }
 
 function parseDnbMarcXml(xmlText) {
@@ -1202,6 +1225,57 @@ async function enrichByIsbn(isbn, prefer) {
   };
 }
 
+async function enrichLookupByIsbn(isbn, prefer) {
+  const [ol, gg] = await Promise.all([fetchOpenLibraryLookup(isbn), fetchGoogle(isbn)]);
+  const order = buildSourceOrder(prefer);
+
+  const titleBySource = {
+    openlibrary: ol.bookDoc?.title || ol.doc?.title || '',
+    google: gg.googleDoc?.title || '',
+  };
+
+  const openLibraryAuthors = normalizePersonList([
+    ...(ol.bookDoc?.authors || []).map((author) => author?.name || ''),
+    ...(ol.doc?.author_name || []),
+  ]).join('; ');
+
+  const author = pickBySourceOrder(
+    {
+      openlibrary: openLibraryAuthors,
+      google: normalizePersonList(gg.googleDoc?.authors || []).join('; '),
+    },
+    order,
+  );
+
+  const title = pickBySourceOrder(titleBySource, order);
+  const sourceUrls = {
+    openlibrary: ol.searchUrl,
+    google: gg.googleUrl,
+  };
+
+  return {
+    isbn,
+    title,
+    author,
+    publisher: pickBySourceOrder(
+      {
+        openlibrary: ol.bookDoc?.publishers?.[0]?.name || '',
+        google: gg.googleDoc?.publisher || '',
+      },
+      order,
+    ),
+    publishDate: pickBySourceOrder(
+      {
+        openlibrary: ol.bookDoc?.publish_date || '',
+        google: gg.googleDoc?.publishedDate || '',
+      },
+      order,
+    ),
+    sourceUsed: pickSourceByOrder(titleBySource, order) || pickSourceByOrder(sourceUrls, order),
+    coverUrl: resolveLookupCoverUrl(isbn, ol, gg),
+  };
+}
+
 function buildMarcRecord(row) {
   const authors = normalizePersonList(String(row.author || '').split(';'));
   const contributorRows = Array.isArray(row.contributors) ? row.contributors : [];
@@ -1352,7 +1426,7 @@ app.post('/api/lookup', async (req, res) => {
           continue;
         }
 
-        const row = await enrichByIsbn(isbn, prefer);
+        const row = await enrichLookupByIsbn(isbn, prefer);
         if (!row.title) {
           results.push({ isbn, title: '', status: 'not_found' });
           continue;
